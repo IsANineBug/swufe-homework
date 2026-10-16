@@ -4,8 +4,10 @@ set -euo pipefail
 FILE="${1:?用法: $0 <备份文件.dump>}"
 DEPLOY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DEPLOY_DIR"
+set -a
 # shellcheck source=/dev/null
-set -a; . ./.env; set +a
+. ./.env
+set +a
 DB="${POSTGRES_DB:-homework}"; DBUSER="${POSTGRES_USER:-homework}"
 
 read -r -p "将用 $FILE 覆盖数据库 $DB，输入 yes 继续：" ok
