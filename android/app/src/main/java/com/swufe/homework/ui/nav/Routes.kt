@@ -24,6 +24,14 @@ object Routes {
     // ---- 班级页（WS5 实现内容；WS4 提供「不是我的班」与班级信息头部）----
     @Serializable data class ClassPage(val classId: Int)
 
+    // ---- 作业（WS5）----
+    @Serializable data class AssignmentDetail(val id: Int)
+    /** 发布：只给 classId；补充：再给 assignmentId；编辑自己的来源：再给 sourceId。-1 表示无。 */
+    @Serializable data class Publish(val classId: Int, val assignmentId: Int = -1, val sourceId: Int = -1)
+    @Serializable data object MyPoints
+    @Serializable data object PointsRules
+    @Serializable data object ReminderGuide
+
     // ---- 我的（WS4）----
     @Serializable data object Settings
     @Serializable data object Invites

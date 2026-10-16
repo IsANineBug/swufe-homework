@@ -26,6 +26,14 @@ import com.swufe.homework.ui.auth.RecoveryCodeScreen
 import com.swufe.homework.ui.auth.RegisterScreen
 import com.swufe.homework.ui.common.CenterLoading
 import com.swufe.homework.ui.common.UpdateDialog
+import com.swufe.homework.ui.homework.ClassBody
+import com.swufe.homework.ui.homework.DetailScreen
+import com.swufe.homework.ui.homework.FirstLaunchGuide
+import com.swufe.homework.ui.homework.HomeScreen
+import com.swufe.homework.ui.homework.MyPointsScreen
+import com.swufe.homework.ui.homework.PointsRulesScreen
+import com.swufe.homework.ui.homework.PublishScreen
+import com.swufe.homework.ui.homework.ReminderGuideScreen
 import com.swufe.homework.ui.main.MainScreen
 import com.swufe.homework.ui.me.InvitesScreen
 import com.swufe.homework.ui.me.SettingsScreen
@@ -61,7 +69,7 @@ class AppViewModel @Inject constructor(
 }
 
 @Composable
-fun AppNavHost(vm: AppViewModel = hiltViewModel()) {
+fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel()) {
     val loggedIn by vm.loggedIn.collectAsStateWithLifecycle()
     val nav = rememberNavController()
 
@@ -69,6 +77,18 @@ fun AppNavHost(vm: AppViewModel = hiltViewModel()) {
         vm.session.expired.collect {
             vm.onSessionExpired()
             nav.goTo(Routes.Login)
+        }
+    }
+
+    // 通知点击进入作业详情（MainActivity 收到 intent extra 后放进 deepLinks）
+    if (deepLinks != null && loggedIn == true) {
+        LaunchedEffect(deepLinks) {
+            deepLinks.assignment.collect { id ->
+                if (id != null) {
+                    nav.navigate(Routes.AssignmentDetail(id)) { launchSingleTop = true }
+                    deepLinks.consume()
+                }
+            }
         }
     }
 
@@ -106,6 +126,7 @@ fun AppNavHost(vm: AppViewModel = hiltViewModel()) {
             })
         }
         composable<Routes.Main> {
+            FirstLaunchGuide(onShow = { nav.navigate(Routes.ReminderGuide) { launchSingleTop = true } })
             MainScreen(
                 onImport = { nav.navigate(Routes.TimetableImport) },
                 onManual = { nav.navigate(Routes.TimetableManual) },
@@ -113,6 +134,10 @@ fun AppNavHost(vm: AppViewModel = hiltViewModel()) {
                 onSettings = { nav.navigate(Routes.Settings) },
                 onInvites = { nav.navigate(Routes.Invites) },
                 onLoggedOut = { nav.goTo(Routes.Login) },
+                onPoints = { nav.navigate(Routes.MyPoints) },
+                onRules = { nav.navigate(Routes.PointsRules) },
+                onReminderGuide = { nav.navigate(Routes.ReminderGuide) },
+                home = { HomeScreen(onOpen = { nav.navigate(Routes.AssignmentDetail(it)) }) },
             )
         }
         composable<Routes.TimetableImport> {
@@ -122,8 +147,41 @@ fun AppNavHost(vm: AppViewModel = hiltViewModel()) {
             ImportScreen(manual = true, onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
         }
         composable<Routes.ClassPage> {
-            ClassPageScreen(onBack = { nav.popBackStack() }, onLeft = { nav.popBackStack() })
+            ClassPageScreen(
+                onBack = { nav.popBackStack() },
+                onLeft = { nav.popBackStack() },
+                body = { classId ->
+                    ClassBody(
+                        classId = classId,
+                        onOpen = { nav.navigate(Routes.AssignmentDetail(it)) },
+                        onPublish = { nav.navigate(Routes.Publish(classId)) },
+                    )
+                },
+            )
         }
+        composable<Routes.AssignmentDetail> {
+            DetailScreen(
+                onBack = { nav.popBackStack() },
+                onOpenClass = { nav.navigate(Routes.ClassPage(it)) { launchSingleTop = true } },
+                onOpenAssignment = { nav.navigate(Routes.AssignmentDetail(it)) },
+                onSupplement = { c, a -> nav.navigate(Routes.Publish(c, assignmentId = a)) },
+                onEditSource = { c, a, s -> nav.navigate(Routes.Publish(c, assignmentId = a, sourceId = s)) },
+            )
+        }
+        composable<Routes.Publish> { entry ->
+            val r = entry.toRoute<Routes.Publish>()
+            PublishScreen(
+                onBack = { nav.popBackStack() },
+                onDone = { id ->
+                    // 补充/编辑回到原详情页；新发布（或作为补充发到别的作业）进入那条作业
+                    if (r.assignmentId == id) nav.popBackStack()
+                    else nav.navigate(Routes.AssignmentDetail(id)) { popUpTo<Routes.Publish> { inclusive = true } }
+                },
+            )
+        }
+        composable<Routes.MyPoints> { MyPointsScreen(onBack = { nav.popBackStack() }, onRules = { nav.navigate(Routes.PointsRules) }) }
+        composable<Routes.PointsRules> { PointsRulesScreen(onBack = { nav.popBackStack() }) }
+        composable<Routes.ReminderGuide> { ReminderGuideScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Settings> { SettingsScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Invites> { InvitesScreen(onBack = { nav.popBackStack() }) }
     }
@@ -135,4 +193,12 @@ fun NavHostController.goTo(route: Any) {
         popUpTo(0) { inclusive = true }
         launchSingleTop = true
     }
+}
+
+/** 通知点击带来的待打开作业 id（MainActivity 写入，导航图消费）。 */
+class DeepLinks {
+    private val _assignment = kotlinx.coroutines.flow.MutableStateFlow<Int?>(null)
+    val assignment: kotlinx.coroutines.flow.StateFlow<Int?> = _assignment
+    fun open(id: Int) { _assignment.value = id }
+    fun consume() { _assignment.value = null }
 }

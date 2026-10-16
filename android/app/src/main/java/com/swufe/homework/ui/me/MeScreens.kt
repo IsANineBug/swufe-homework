@@ -50,7 +50,15 @@ import com.swufe.homework.ui.common.UpdateDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MeScreen(onSettings: () -> Unit, onInvites: () -> Unit, onLoggedOut: () -> Unit, vm: MeViewModel = hiltViewModel()) {
+fun MeScreen(
+    onSettings: () -> Unit,
+    onInvites: () -> Unit,
+    onLoggedOut: () -> Unit,
+    onPoints: () -> Unit = {},
+    onRules: () -> Unit = {},
+    onReminderGuide: () -> Unit = {},
+    vm: MeViewModel = hiltViewModel(),
+) {
     val me by vm.me.collectAsStateWithLifecycle()
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -66,7 +74,9 @@ fun MeScreen(onSettings: () -> Unit, onInvites: () -> Unit, onLoggedOut: () -> U
         HorizontalDivider()
         NavRow("设置", "昵称、榜单匿名", onSettings)
         NavRow("我的邀请码", me?.let { "剩余名额 ${it.invitesRemaining}" }, onInvites)
-        // WS5：在这里加「我的积分」「积分规则」入口
+        NavRow("我的积分", "每一笔积分的来源", onPoints)
+        NavRow("积分规则", null, onRules)
+        NavRow("提醒设置", "通知、精确闹钟、自启动、电池白名单", onReminderGuide)
         ListItem(
             headlineContent = { Text("检查更新") },
             supportingContent = { Text(vm.updateMsg ?: "当前版本 ${BuildConfig.VERSION_NAME}") },
