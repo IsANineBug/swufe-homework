@@ -101,9 +101,9 @@ fun AppNavHost(vm: AppViewModel = hiltViewModel()) {
         }
         composable<Routes.RecoveryCode> { entry ->
             val r = entry.toRoute<Routes.RecoveryCode>()
-            RecoveryCodeScreen(r.code, r.fromRecover) {
-                nav.goTo(if (r.fromRecover) Routes.Login else Routes.Main)
-            }
+            RecoveryCodeScreen(r.code, r.fromRecover, onConfirmed = { loggedIn ->
+                nav.goTo(if (loggedIn) Routes.Main else Routes.Login)
+            })
         }
         composable<Routes.Main> {
             MainScreen(

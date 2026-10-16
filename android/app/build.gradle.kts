@@ -7,10 +7,18 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
-// 服务器地址与证书公钥 pin：CI 从 GitHub Secrets 注入（环境变量 SWUFE_SERVER_URL / SWUFE_CERT_PIN），
-// 本地可写在 ~/.gradle/gradle.properties 的 swufe.serverUrl / swufe.certPin。不要提交真实值。
-fun cfg(prop: String, env: String, default: String = ""): String =
-    (providers.gradleProperty(prop).orNull ?: System.getenv(env) ?: default).replace("\"", "")
+// 构建时注入的配置。变量名按 issue #4 裁决 1 与 WS6 release.yml 统一（见 docs/workstreams.md）：
+//   SERVER_BASE_URL / SERVER_CERT_PIN → BuildConfig
+//   SIGNING_STORE_FILE / SIGNING_STORE_PASSWORD / SIGNING_KEY_ALIAS / SIGNING_KEY_PASSWORD → release 签名
+//   VERSION_NAME / VERSION_CODE
+// 本地可在 ~/.gradle/gradle.properties 用同名 Gradle 属性覆盖。不要提交真实值。
+fun cfg(name: String, default: String = ""): String =
+    (providers.gradleProperty(name).orNull ?: System.getenv(name) ?: default).replace("\"", "").trim()
+
+val defaultServerUrl = "https://127.0.0.1:8443/api/v1/"
+val serverUrl = cfg("SERVER_BASE_URL", defaultServerUrl)
+val certPin = cfg("SERVER_CERT_PIN")
+val signingStoreFile = cfg("SIGNING_STORE_FILE")
 
 android {
     namespace = "com.swufe.homework"
@@ -20,24 +28,23 @@ android {
         applicationId = "com.swufe.homework"
         minSdk = 26
         targetSdk = 35
-        versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
-        versionName = System.getenv("VERSION_NAME") ?: "0.1.0"
+        versionCode = cfg("VERSION_CODE", "1").toInt()
+        versionName = cfg("VERSION_NAME", "0.1.0")
 
         ndk { abiFilters += "arm64-v8a" }
 
-        buildConfigField("String", "SERVER_URL", "\"${cfg("swufe.serverUrl", "SWUFE_SERVER_URL", "https://127.0.0.1:8443/api/v1/")}\"")
-        buildConfigField("String", "CERT_PIN", "\"${cfg("swufe.certPin", "SWUFE_CERT_PIN")}\"")
+        buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
+        buildConfigField("String", "CERT_PIN", "\"$certPin\"")
         buildConfigField("String", "GITHUB_REPO", "\"IsANineBug/swufe-homework\"")
     }
 
     signingConfigs {
         create("release") {
-            val ks = System.getenv("ANDROID_KEYSTORE_PATH")
-            if (ks != null) {
-                storeFile = file(ks)
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
-                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            if (signingStoreFile.isNotEmpty()) {
+                storeFile = file(signingStoreFile)
+                storePassword = cfg("SIGNING_STORE_PASSWORD")
+                keyAlias = cfg("SIGNING_KEY_ALIAS")
+                keyPassword = cfg("SIGNING_KEY_PASSWORD")
             }
         }
     }
@@ -46,7 +53,7 @@ android {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (System.getenv("ANDROID_KEYSTORE_PATH") != null) signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -64,6 +71,24 @@ android {
         warningsAsErrors = false
     }
     testOptions { unitTests.isReturnDefaultValues = true }
+}
+
+// release 必须 fail-closed：缺 pin、地址仍是默认值、或缺签名配置时直接构建失败，
+// 不允许产出无证书固定或未签名的 APK。debug 不受影响。
+gradle.taskGraph.whenReady {
+    val releaseTasks = allTasks.filter { it.project == project && it.name.contains("Release") &&
+        (it.name.startsWith("assemble") || it.name.startsWith("bundle") || it.name.startsWith("package")) }
+    if (releaseTasks.isNotEmpty()) {
+        val missing = buildList {
+            if (certPin.isEmpty()) add("SERVER_CERT_PIN")
+            if (serverUrl == defaultServerUrl || !serverUrl.startsWith("https://")) add("SERVER_BASE_URL（须为 https 且不是默认 127.0.0.1）")
+            if (signingStoreFile.isEmpty() || !file(signingStoreFile).exists()) add("SIGNING_STORE_FILE")
+            if (cfg("SIGNING_STORE_PASSWORD").isEmpty()) add("SIGNING_STORE_PASSWORD")
+            if (cfg("SIGNING_KEY_ALIAS").isEmpty()) add("SIGNING_KEY_ALIAS")
+            if (cfg("SIGNING_KEY_PASSWORD").isEmpty()) add("SIGNING_KEY_PASSWORD")
+        }
+        if (missing.isNotEmpty()) throw GradleException("release 构建缺少配置：${missing.joinToString("、")}")
+    }
 }
 
 ksp {

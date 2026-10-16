@@ -102,7 +102,12 @@ fun RecoverScreen(onBack: () -> Unit, onRecovered: (String) -> Unit, vm: Recover
  * 强制展示恢复码：必须勾选「我已保存」才能继续，且屏蔽返回键。恢复码不在本地保存。
  */
 @Composable
-fun RecoveryCodeScreen(code: String, fromRecover: Boolean, onConfirmed: () -> Unit) {
+fun RecoveryCodeScreen(
+    code: String,
+    fromRecover: Boolean,
+    onConfirmed: (loggedIn: Boolean) -> Unit,
+    vm: RecoveryCodeViewModel = hiltViewModel(),
+) {
     var saved by rememberSaveable { mutableStateOf(false) }
     var copied by rememberSaveable { mutableStateOf(false) }
     val clip = LocalClipboardManager.current
@@ -132,7 +137,9 @@ fun RecoveryCodeScreen(code: String, fromRecover: Boolean, onConfirmed: () -> Un
                 Checkbox(saved, { saved = it })
                 Text("我已妥善保存恢复码")
             }
-            LoadingButton(if (fromRecover) "去登录" else "进入 App", loading = false, enabled = saved, onClick = onConfirmed)
+            LoadingButton(if (fromRecover) "去登录" else "进入 App", loading = false, enabled = saved) {
+                vm.confirm(fromRecover, onConfirmed)
+            }
         }
     }
 }

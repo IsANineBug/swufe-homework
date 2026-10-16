@@ -65,6 +65,7 @@ class SettingsViewModel @Inject constructor(private val account: AccountReposito
     fun saveNickname() {
         val n = nickname.trim()
         if (n.isEmpty() || n.length > 20) { error = "昵称 1–20 个字"; return }
+        if (AuthRepository.isReservedNickname(n)) { error = "这个昵称不能使用，请换一个"; return }
         saving = true; error = null; saved = false
         viewModelScope.launch {
             account.update(MePatch(nickname = n)).onSuccess { saved = true }.onFailure { error = it.userMessage }

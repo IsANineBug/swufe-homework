@@ -21,7 +21,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
-import java.net.URI
 import java.util.concurrent.TimeUnit
 import javax.inject.Qualifier
 import javax.inject.Singleton
@@ -43,11 +42,9 @@ object AppModule {
     /** 带证书固定、但不带鉴权的基础客户端。 */
     @Provides @Singleton @ServerBase
     fun baseClient(): OkHttpClient {
-        val host = URI(BuildConfig.SERVER_URL).host ?: "127.0.0.1"
-        val tls = PinnedTrust.build(BuildConfig.CERT_PIN, host)
+        val tls = PinnedTrust.build(BuildConfig.CERT_PIN, allowEmpty = BuildConfig.DEBUG)
         return OkHttpClient.Builder()
             .sslSocketFactory(tls.socketFactory, tls.trustManager)
-            .apply { tls.hostnameVerifier?.let { hostnameVerifier(it) } }
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)

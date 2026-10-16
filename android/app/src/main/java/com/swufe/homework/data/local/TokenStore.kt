@@ -19,8 +19,16 @@ private val Context.authStore by preferencesDataStore(name = "auth")
  * access / refresh token 存 DataStore。内存里再缓存一份，供 OkHttp 拦截器同步读取。
  * 注意：恢复码从不落盘。
  */
+/** 鉴权拦截器/续期用到的最小接口，便于单测替换。 */
+interface TokenSource {
+    fun accessToken(): String?
+    fun refreshToken(): String?
+    suspend fun save(t: Tokens)
+    suspend fun clear()
+}
+
 @Singleton
-class TokenStore @Inject constructor(@ApplicationContext private val ctx: Context) {
+class TokenStore @Inject constructor(@ApplicationContext private val ctx: Context) : TokenSource {
     private val kAccess = stringPreferencesKey("access_token")
     private val kRefresh = stringPreferencesKey("refresh_token")
 
@@ -34,10 +42,10 @@ class TokenStore @Inject constructor(@ApplicationContext private val ctx: Contex
             (p[kAccess] to p[kRefresh]).also { cache = it }
         }
 
-    fun accessToken(): String? = load().first
-    fun refreshToken(): String? = load().second
+    override fun accessToken(): String? = load().first
+    override fun refreshToken(): String? = load().second
 
-    suspend fun save(t: Tokens) {
+    override suspend fun save(t: Tokens) {
         cache = t.accessToken to t.refreshToken
         ctx.authStore.edit {
             it[kAccess] = t.accessToken
@@ -45,7 +53,7 @@ class TokenStore @Inject constructor(@ApplicationContext private val ctx: Contex
         }
     }
 
-    suspend fun clear() {
+    override suspend fun clear() {
         cache = null to null
         ctx.authStore.edit { it.clear() }
     }

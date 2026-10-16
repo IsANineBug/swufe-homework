@@ -76,11 +76,10 @@ class TimetableRepository @Inject constructor(
 
     suspend fun aiOnline(): Boolean = apiCall { api.aiStatus().online }.getOrDefault(false)
 
-    suspend fun import(slots: List<SlotInput>): Result<TimetableImportResult> = apiCall {
-        val r = api.importTimetable(TimetableImportRequest(slots))
-        dao.replaceAll(api.myClasses())
-        r
-    }
+    /** 导入结果和缓存刷新分开：导入成功后即使刷新 /me/classes 失败，也按成功返回，避免用户重复提交。 */
+    suspend fun import(slots: List<SlotInput>): Result<TimetableImportResult> =
+        apiCall { api.importTimetable(TimetableImportRequest(slots)) }
+            .onSuccess { refreshClasses() }
 
     /**
      * 上传 1–2 张截图 → parse_timetable → 轮询（1.5 秒一次，最多 2 分钟）。
@@ -97,8 +96,8 @@ class TimetableRepository @Inject constructor(
             api.upload(part)
         }
         onStage("电脑正在识别…")
+        // issue #4 裁决 6：App 只传 attachment_ids，服务器校验归属后自行签名生成 image_urls
         val input = buildJsonObject {
-            putJsonArray("image_urls") { attachments.forEach { add(JsonPrimitive(it.url)) } }
             putJsonArray("attachment_ids") { attachments.forEach { add(JsonPrimitive(it.id)) } }
         }
         var job: AiJob = api.createAiJob(AiJobRequest(kind = "parse_timetable", input = input))

@@ -89,7 +89,7 @@ fun ClassPageScreen(
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("退出这个班？") },
-            text = { Text("课表识别错了、或者你不在这个教学班，可以退出。退出后不再收到这个班的作业提醒，之后可以重新导入或手动添加。") },
+            text = { Text("课表识别错了、或者你不在这个教学班，可以退出。退出后不再收到这个班的作业提醒，以后重新导入课表也不会自动加回；如需重新加入，在「手动添加」里搜索这门课。") },
             confirmButton = { TextButton(onClick = { confirm = false; vm.leave(onLeft) }) { Text("退出") } },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消") } },
         )

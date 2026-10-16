@@ -55,6 +55,7 @@ class RegisterViewModel @Inject constructor(private val auth: AuthRepository) : 
     fun validate(): String? = when {
         nickname.isBlank() -> "请填写昵称"
         nickname.trim().length > 20 -> "昵称最多 20 个字"
+        AuthRepository.isReservedNickname(nickname) -> "这个昵称不能使用，请换一个"
         password.length < MIN_PASSWORD -> "密码至少 $MIN_PASSWORD 位"
         password.length > 64 -> "密码最多 64 位"
         password != password2 -> "两次输入的密码不一致"
@@ -71,6 +72,16 @@ class RegisterViewModel @Inject constructor(private val auth: AuthRepository) : 
                 .onFailure { error = it.userMessage }
             loading = false
         }
+    }
+}
+
+/** 恢复码页：注册流程下确认后才把 token 落盘。 */
+@HiltViewModel
+class RecoveryCodeViewModel @Inject constructor(private val auth: AuthRepository) : ViewModel() {
+    /** onDone(true) 进首页；onDone(false) 说明进程被回收过，需重新登录。 */
+    fun confirm(fromRecover: Boolean, onDone: (Boolean) -> Unit) {
+        if (fromRecover) { onDone(false); return }
+        viewModelScope.launch { onDone(auth.confirmRegistration()) }
     }
 }
 

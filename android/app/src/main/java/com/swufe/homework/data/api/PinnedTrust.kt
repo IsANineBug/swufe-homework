@@ -6,7 +6,6 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
-import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManagerFactory
@@ -40,21 +39,21 @@ object PinnedTrust {
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
     }
 
-    data class Tls(val socketFactory: SSLSocketFactory, val trustManager: X509TrustManager, val hostnameVerifier: HostnameVerifier?)
+    data class Tls(val socketFactory: SSLSocketFactory, val trustManager: X509TrustManager)
 
     /**
-     * pin 为空时（本地开发）退回系统默认信任；有 pin 时只接受 pin 匹配的证书，
-     * 并只对配置的服务器 host 放行主机名校验（自签证书通常不带 IP SAN）。
+     * 有 pin 时只接受 pin 匹配的证书；主机名用 OkHttp 默认校验（deploy/scripts/gen-cert.sh 生成的证书带 IP SAN）。
+     * pin 为空只允许 debug 构建（本地对接正规证书的测试服务器），release 直接抛错，绝不静默退回系统 CA。
      */
-    fun build(rawPins: String, serverHost: String): Tls {
+    fun build(rawPins: String, allowEmpty: Boolean): Tls {
         val pins = parsePins(rawPins)
+        if (pins.isEmpty() && !allowEmpty) throw IllegalStateException("release 构建缺少 SERVER_CERT_PIN，拒绝建立连接")
         val tm: X509TrustManager = if (pins.isEmpty()) {
             val f = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
             f.init(null as KeyStore?)
             f.trustManagers.filterIsInstance<X509TrustManager>().first()
         } else PinTrustManager(pins)
         val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
-        val hv = if (pins.isEmpty()) null else HostnameVerifier { host, _ -> host.equals(serverHost, ignoreCase = true) }
-        return Tls(ctx.socketFactory, tm, hv)
+        return Tls(ctx.socketFactory, tm)
     }
 }

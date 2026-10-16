@@ -18,6 +18,18 @@
   2. 在 `docs/handoff/WS<编号>.md` 覆盖写一段交接：做到哪、下一步做什么、未解决的问题和坑、相关 PR/分支；
   3. 不再开新任务。下一个 Hark 开工时先读这个文件和分支。
 - 需要改接口或表结构时：在 PR 里同时改 `api.yaml` / `schema.sql`，并 @ 受影响的工作线。
+- **Android 构建环境变量**（issue #4 裁决 1，WS4 的 `android/app/build.gradle.kts` 与 WS6 的 release workflow 只用这一套名字）：
+
+  | 变量 | 用途 | 来源 |
+  |---|---|---|
+  | `SERVER_BASE_URL` | 服务器地址，如 `https://<IP>:8443/api/v1` | GitHub Secrets |
+  | `SERVER_CERT_PIN` | `deploy/scripts/gen-cert.sh` 输出的 `sha256/<base64>`，换证书时可逗号分隔多个 | GitHub Secrets |
+  | `SIGNING_STORE_FILE` | release keystore 文件路径（CI 由 `ANDROID_KEYSTORE_BASE64` 解码到临时目录） | workflow |
+  | `SIGNING_STORE_PASSWORD` / `SIGNING_KEY_ALIAS` / `SIGNING_KEY_PASSWORD` | 签名口令与别名 | GitHub Secrets |
+  | `VERSION_NAME` | tag 去掉 `v`，App 检查更新靠它比较 | workflow |
+  | `VERSION_CODE` | `github.run_number` | workflow |
+
+  release 构建 fail-closed：缺 pin、地址仍是默认 `127.0.0.1` 或缺签名配置时 Gradle 直接报错；只有 debug 允许 pin 为空。
 
 ---
 
@@ -92,7 +104,7 @@
 先读 docs/requirements.md、docs/api.yaml。
 
 1. 骨架：单 Activity + Navigation Compose、Hilt、Retrofit + OkHttp + kotlinx.serialization、Room（本地缓存）、
-   DataStore（token、设置）。OkHttp 做证书公钥固定（服务器自签证书，pin 由 BuildConfig 注入，来自 GitHub Secrets）。
+   DataStore（token、设置）。OkHttp 做证书公钥固定（服务器自签证书，pin 由 BuildConfig 注入，来自 GitHub Secrets 的 `SERVER_CERT_PIN`，变量名见通用约定）。
    根据 api.yaml 生成或手写 API 层；401 自动用 refresh token 续期。
 2. 账号：注册（先调 /auth/campus-check，非校园网则要求邀请码）、注册成功强制展示恢复码并要求用户确认已保存、
    登录、用恢复码找回、设置页（昵称、榜单匿名开关）、我的邀请码（复制、剩余名额）。
@@ -140,7 +152,7 @@
 4. 备份：每日 03:30 pg_dump 压缩，保留 7 天；上传目录不备份（图片按学期清理）。写恢复步骤。
 5. GitHub Actions：
    - server：PR 跑 go test + golangci-lint；main 构建镜像（可推 GHCR）。
-   - android：PR 跑单测和 lint；打 tag v* 时构建 release APK（arm64-v8a），签名密钥与证书 pin 来自 Secrets，发布到 GitHub Releases。
+   - android：PR 跑单测和 lint；打 tag v* 时构建 release APK（arm64-v8a），签名密钥与证书 pin 来自 Secrets（环境变量名见通用约定「Android 构建环境变量」），发布到 GitHub Releases。
    - worker：tag 时交叉编译 Windows/macOS/Linux 二进制附到同一个 Release。
 6. deploy/README.md：从零部署步骤、更新步骤、如何填 CAMPUS_CIDRS、监控磁盘（预计每学期图片约 2GB）。
 ```

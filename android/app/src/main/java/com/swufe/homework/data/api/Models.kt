@@ -34,6 +34,12 @@ data class LoginRequest(val nickname: String, val password: String)
 data class RefreshRequest(@SerialName("refresh_token") val refreshToken: String)
 
 @Serializable
+data class LogoutRequest(
+    @SerialName("refresh_token") val refreshToken: String,
+    val all: Boolean = false,
+)
+
+@Serializable
 data class RecoverRequest(
     val nickname: String,
     @SerialName("recovery_code") val recoveryCode: String,

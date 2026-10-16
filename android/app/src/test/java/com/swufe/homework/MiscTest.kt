@@ -38,3 +38,12 @@ class MiscTest {
         assertEquals(5, b[1].weekday)
     }
 }
+
+class ReservedNicknameTest {
+    @Test fun reserved() {
+        org.junit.Assert.assertTrue(AuthRepository.isReservedNickname("管理员"))
+        org.junit.Assert.assertTrue(AuthRepository.isReservedNickname(" ＡＤＭＩＮ "))
+        org.junit.Assert.assertTrue(AuthRepository.isReservedNickname("官 方"))
+        org.junit.Assert.assertFalse(AuthRepository.isReservedNickname("管理员小王"))
+    }
+}

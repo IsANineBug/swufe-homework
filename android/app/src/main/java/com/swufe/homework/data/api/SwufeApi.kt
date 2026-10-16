@@ -30,8 +30,9 @@ interface SwufeApi {
     @POST("auth/recover")
     suspend fun recover(@Body body: RecoverRequest): RecoverResponse
 
+    /** 带本机 refresh_token 只注销本机（issue #4 裁决 5）。 */
     @POST("auth/logout")
-    suspend fun logout(): Response<Unit>
+    suspend fun logout(@Body body: LogoutRequest): Response<Unit>
 
     // ---- me ----
     @GET("meta")

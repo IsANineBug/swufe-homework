@@ -95,6 +95,7 @@ paths:
     post:
       tags: [auth]
       security: []
+      summary: 续期。返回新的一对 token，旧 refresh token 立即作废
       requestBody:
         required: true
         content:
@@ -737,10 +738,14 @@ components:
 
     Tokens:
       type: object
+      description: |
+        登录、注册、续期都返回新的一对 token。/auth/refresh 每次都轮换：返回新的 refresh_token，
+        旧 refresh_token 立即作废（issue #4 裁决 7）。
+      required: [access_token, refresh_token, expires_in]
       properties:
         access_token: {type: string}
         refresh_token: {type: string}
-        expires_in: {type: integer}
+        expires_in: {type: integer, description: access token 有效秒数}
 
     Semester:
       type: object

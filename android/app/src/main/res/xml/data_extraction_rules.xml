@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+：云备份与设备间迁移都排除登录态（DataStore auth）和本地缓存，换机后需重新登录。 -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/auth.preferences_pb" />
+        <exclude domain="database" path="swufe.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/auth.preferences_pb" />
+        <exclude domain="database" path="swufe.db" />
+    </device-transfer>
+</data-extraction-rules>
