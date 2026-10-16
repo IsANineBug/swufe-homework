@@ -1,0 +1,896 @@
+openapi: 3.1.0
+info:
+  title: swufe-homework API
+  version: 0.1.0
+  description: |
+    西财作业 App 后端接口。需求见 docs/requirements.md。
+    - 基础路径 /api/v1，HTTPS（IP+端口，自签证书，App 内固定公钥）。
+    - 认证：Authorization: Bearer <access token>（15 分钟），用 refresh token 续期（30 天）。
+    - 时间均为 ISO 8601，带 +08:00。业务时区 Asia/Shanghai。
+    - 错误统一返回 Error；code 为机器可读字符串。
+    - 「删除」在用户侧是删除，服务端为软删除，只有管理员（role=admin）可恢复。
+servers:
+  - url: https://{host}:{port}/api/v1
+    variables:
+      host: {default: 127.0.0.1}
+      port: {default: "8443"}
+security:
+  - bearer: []
+
+tags:
+  - {name: auth, description: 注册、登录、找回}
+  - {name: me, description: 我的信息、邀请、积分}
+  - {name: timetable, description: 课表导入与班级}
+  - {name: assignments, description: 作业、来源、完成状态}
+  - {name: moderation, description: 合并、删除投票、谢谢}
+  - {name: ai, description: AI 草稿（电脑在线时可用）}
+  - {name: worker, description: 电脑端 worker 专用}
+  - {name: admin, description: 管理员}
+
+paths:
+  /auth/campus-check:
+    get:
+      tags: [auth]
+      security: []
+      summary: 当前请求是否来自西财校园网出口 IP（配置项 CAMPUS_CIDRS）
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: object, properties: {campus: {type: boolean}}, required: [campus]}
+
+  /auth/register:
+    post:
+      tags: [auth]
+      security: []
+      summary: 注册。邀请码或校园网 IP 满足其一即可
+      description: |
+        无邀请码且不在校园网 → 403 need_invite_or_campus。
+        校园网注册 inviter_id 为空（邀请树根）。recovery_code 只返回这一次。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname, password]
+              properties:
+                nickname: {type: string, minLength: 1, maxLength: 20}
+                password: {type: string, minLength: 8, maxLength: 64}
+                invite_code: {type: [string, "null"]}
+      responses:
+        "201":
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Tokens'
+                  - type: object
+                    properties:
+                      recovery_code: {type: string, description: 形如 XXXX-XXXX-XXXX-XXXX，仅显示一次}
+        "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname, password]
+              properties:
+                nickname: {type: string}
+                password: {type: string}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Tokens'}}}}
+        "401": {$ref: '#/components/responses/Error'}
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [refresh_token], properties: {refresh_token: {type: string}}}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Tokens'}}}}
+        "401": {$ref: '#/components/responses/Error'}
+
+  /auth/recover:
+    post:
+      tags: [auth]
+      security: []
+      summary: 用恢复码重设密码，并返回新的恢复码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname, recovery_code, new_password]
+              properties:
+                nickname: {type: string}
+                recovery_code: {type: string}
+                new_password: {type: string, minLength: 8}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: object, properties: {new_recovery_code: {type: string}}}
+        "401": {$ref: '#/components/responses/Error'}
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      responses: {"204": {description: 已注销当前 refresh token}}
+
+  /meta:
+    get:
+      tags: [me]
+      security: []
+      summary: 当前学期与 12 节作息
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  semester: {$ref: '#/components/schemas/Semester'}
+                  periods:
+                    type: array
+                    items: {type: object, properties: {no: {type: integer}, start: {type: string}, end: {type: string}}}
+                  server_time: {type: string, format: date-time}
+
+  /me:
+    get:
+      tags: [me]
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+    patch:
+      tags: [me]
+      summary: 修改昵称、榜单匿名
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: {type: string}
+                leaderboard_anonymous: {type: boolean}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+
+  /me/invites:
+    get:
+      tags: [me]
+      summary: 我的邀请码及使用情况（剩余名额 = invite_quota - 已用）
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  remaining: {type: integer}
+                  codes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: {type: string}
+                        used_by_nickname: {type: [string, "null"]}
+                        used_at: {type: [string, "null"], format: date-time}
+    post:
+      tags: [me]
+      summary: 生成一个邀请码（未使用的码也占名额）
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {type: object, properties: {code: {type: string}}}}}}
+        "403": {$ref: '#/components/responses/Error'}
+
+  /me/points:
+    get:
+      tags: [me]
+      summary: 积分明细与汇总
+      parameters:
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  semester_total: {type: integer}
+                  today_earned: {type: integer, description: 今日已得正分，上限 30}
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/PointsEntry'}
+                  next_cursor: {type: [string, "null"]}
+
+  /me/notices:
+    get:
+      tags: [me]
+      summary: 站内通知（合并请求、禁发、邀请人违规提醒、规则公告）
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Notice'}}
+
+  /me/classes:
+    get:
+      tags: [timetable]
+      summary: 我加入的班级（含时段），用于课表页
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Class'}}
+
+  /me/classes/{class_id}:
+    delete:
+      tags: [timetable]
+      summary: 「不是我的班」——退出该班
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      responses: {"204": {description: 已退出}}
+
+  /timetable/import:
+    post:
+      tags: [timetable]
+      summary: 提交用户确认后的课表，服务器自动归班
+      description: |
+        规则（全自动，不弹窗）：
+        1. 本次提交中同名的时段合成一个班；
+        2. 课名相同，且任一时段「教室+星期+节次」与已有班重叠 → 加入该班，并补全该班缺的时段；
+        3. 都不重叠 → 新建班，提交者为第一个成员；
+        4. 同一组时段命中两个已有班 → 两班自动合并（成员、时段、作业归到较早创建的班）。
+        时段重叠但课名不同（多为识别错误）→ 返回 conflicts，该组不入库，由用户改名后重提。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slots]
+              properties:
+                slots:
+                  type: array
+                  maxItems: 60
+                  items: {$ref: '#/components/schemas/SlotInput'}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  joined: {type: array, items: {$ref: '#/components/schemas/Class'}}
+                  created: {type: array, items: {$ref: '#/components/schemas/Class'}}
+                  merged:
+                    type: array
+                    items: {type: object, properties: {from: {type: integer}, into: {type: integer}}}
+                  conflicts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        slot: {$ref: '#/components/schemas/SlotInput'}
+                        existing_class: {$ref: '#/components/schemas/Class'}
+
+  /classes/search:
+    get:
+      tags: [timetable]
+      summary: 手动录入时按课名模糊搜索（含被截断的前缀）
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Class'}}
+
+  /classes/{class_id}:
+    get:
+      tags: [timetable]
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Class'}}}}
+
+  /classes/{class_id}/assignments:
+    get:
+      tags: [assignments]
+      summary: 班级页，按日期查看
+      parameters:
+        - {$ref: '#/components/parameters/ClassId'}
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/AssignmentSummary'}}
+    post:
+      tags: [assignments]
+      summary: 新建作业（首发）
+      description: |
+        必须是班级成员；禁发期内 403 post_banned；当天在该班已发 5 条（被删除的不计）429 daily_limit。
+        有图片时 ddl 必填。发布前 App 应先调 /candidates。
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssignmentCreate'}
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Assignment'}}}}
+        "403": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
+
+  /classes/{class_id}/assignments/candidates:
+    post:
+      tags: [assignments]
+      summary: 发布前查重，最多 3 条（近 7 天、DDL ±1 天、标题相似度）
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string}
+                ddl: {type: [string, "null"], format: date-time}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/AssignmentSummary'}}
+
+  /classes/{class_id}/leaderboard:
+    get:
+      tags: [moderation]
+      parameters:
+        - {$ref: '#/components/parameters/ClassId'}
+        - {name: scope, in: query, required: true, schema: {type: string, enum: [week, semester]}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rep: {type: [object, "null"], description: 课代表（学期第一）, properties: {display_name: {type: string}}}
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rank: {type: integer}
+                        display_name: {type: string, description: 匿名时为「匿名同学」}
+                        points: {type: integer}
+                        is_me: {type: boolean}
+
+  /feed:
+    get:
+      tags: [assignments]
+      summary: 首页：我所有班级的未过期作业，按 DDL 升序，含我的完成状态
+      parameters:
+        - {name: include_done, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/AssignmentSummary'}}
+
+  /sync:
+    get:
+      tags: [assignments]
+      summary: 增量同步（用于本地提醒）。返回 since 之后变更的我班级的作业
+      parameters:
+        - {name: since, in: query, schema: {type: string, format: date-time}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  now: {type: string, format: date-time}
+                  changed: {type: array, items: {$ref: '#/components/schemas/AssignmentSummary'}}
+                  removed_ids: {type: array, items: {type: integer}, description: 已删除或已合并走的作业}
+
+  /assignments/{assignment_id}:
+    get:
+      tags: [assignments]
+      parameters: [{$ref: '#/components/parameters/AssignmentId'}]
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Assignment'}}}}
+        "404": {$ref: '#/components/responses/Error'}
+    patch:
+      tags: [assignments]
+      summary: 首发者修改标题/DDL
+      parameters: [{$ref: '#/components/parameters/AssignmentId'}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+                ddl: {type: string, format: date-time}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Assignment'}}}}
+        "403": {$ref: '#/components/responses/Error'}
+
+  /assignments/{assignment_id}/sources:
+    post:
+      tags: [assignments]
+      summary: 给已有作业补充内容。stated_ddl 与作业 DDL 不一致时作业标红
+      parameters: [{$ref: '#/components/parameters/AssignmentId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SourceCreate'}
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Source'}}}}
+        "403": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
+
+  /assignments/{assignment_id}/done:
+    put:
+      tags: [assignments]
+      summary: 标记完成（仅本人可见，停止提醒）
+      parameters: [{$ref: '#/components/parameters/AssignmentId'}]
+      responses: {"204": {description: ok}}
+    delete:
+      tags: [assignments]
+      summary: 取消完成
+      parameters: [{$ref: '#/components/parameters/AssignmentId'}]
+      responses: {"204": {description: ok}}
+
+  /sources/{source_id}:
+    patch:
+      tags: [assignments]
+      summary: 作者编辑自己的来源
+      parameters: [{$ref: '#/components/parameters/SourceId'}]
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SourceCreate'}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Source'}}}}
+    delete:
+      tags: [assignments]
+      summary: 作者删除自己的来源（不扣分，但该来源积分作废）
+      parameters: [{$ref: '#/components/parameters/SourceId'}]
+      responses: {"204": {description: ok}}
+
+  /uploads:
+    post:
+      tags: [assignments]
+      summary: 上传图片/附件（App 已压缩到约 1MB；服务器上限 10MB，生成缩略图）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+      responses:
+        "201":
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Attachment'}
+        "413": {$ref: '#/components/responses/Error'}
+
+  /sources/{source_id}/thanks:
+    post:
+      tags: [moderation]
+      summary: 谢谢（不能谢自己，每人每条一次）
+      parameters: [{$ref: '#/components/parameters/SourceId'}]
+      responses:
+        "204": {description: ok}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /sources/{source_id}/delete-votes:
+    post:
+      tags: [moderation]
+      summary: 投票删除错误或虚假内容
+      description: |
+        门槛 = clamp(ceil(班级成员数 × 10%), 3, 6)。达到门槛即软删除，
+        收回积分并扣 10 分；30 天内第 3 次被删 → 该班禁发 7 天；
+        作者为邀请注册时通知其直接邀请人。
+        App 必须先弹出警示，确认按钮倒数 3 秒。
+      parameters: [{$ref: '#/components/parameters/SourceId'}]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  votes: {type: integer}
+                  threshold: {type: integer}
+                  deleted: {type: boolean}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /merge-proposals:
+    post:
+      tags: [moderation]
+      summary: 提议把 from 合并到 to（同一班级）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_id, to_id]
+              properties:
+                from_id: {type: integer}
+                to_id: {type: integer}
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/MergeProposal'}}}}
+
+  /merge-proposals/{proposal_id}/accept:
+    post:
+      tags: [moderation]
+      summary: 被合并作业（from）的首发者同意，立即执行
+      parameters: [{$ref: '#/components/parameters/ProposalId'}]
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/MergeProposal'}}}}
+        "403": {$ref: '#/components/responses/Error'}
+
+  /merge-proposals/{proposal_id}/votes:
+    post:
+      tags: [moderation]
+      summary: 班级成员赞同；满 3 人执行
+      description: |
+        执行：搬来源（不删内容）、from 标记 merged_into、完成状态并集、
+        DDL 不一致则 to 标红、积分按 points-rules 调整、推送 sync 变更。
+      parameters: [{$ref: '#/components/parameters/ProposalId'}]
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/MergeProposal'}}}}
+
+  /ai/status:
+    get:
+      tags: [ai]
+      summary: 电脑 worker 是否在线（离线时 App 置灰 AI 按钮）
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  online: {type: boolean}
+                  last_seen: {type: [string, "null"], format: date-time}
+
+  /ai/jobs:
+    post:
+      tags: [ai]
+      summary: 发起 AI 任务；离线直接 409，不排队
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, input]
+              properties:
+                kind: {type: string, enum: [parse_assignment, parse_timetable, dedupe_review, spam_check]}
+                class_id: {type: [integer, "null"]}
+                input: {type: object, description: 见 docs/ai-contract.md}
+      responses:
+        "202": {description: 已接收, content: {application/json: {schema: {$ref: '#/components/schemas/AiJob'}}}}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /ai/jobs/{job_id}:
+    get:
+      tags: [ai]
+      summary: 轮询结果（建议每 1.5 秒，最多 2 分钟）
+      parameters:
+        - {name: job_id, in: path, required: true, schema: {type: integer}}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AiJob'}}}}
+
+  /worker/heartbeat:
+    post:
+      tags: [worker]
+      security: [{worker: []}]
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {worker_id: {type: string}, model: {type: string}}}
+      responses: {"204": {description: ok}}
+
+  /worker/jobs/claim:
+    post:
+      tags: [worker]
+      security: [{worker: []}]
+      summary: 长轮询领取任务（最长挂起 25 秒，无任务返回 204）
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AiJob'}}}}
+        "204": {description: 暂无任务}
+
+  /worker/jobs/{job_id}/result:
+    post:
+      tags: [worker]
+      security: [{worker: []}]
+      parameters:
+        - {name: job_id, in: path, required: true, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: {type: string, enum: [done, failed]}
+                output: {type: [object, "null"]}
+                error: {type: [string, "null"]}
+      responses: {"204": {description: ok}}
+
+  /admin/sources/{source_id}/restore:
+    post:
+      tags: [admin]
+      summary: 恢复误删内容，返还积分，可选解除禁发
+      parameters: [{$ref: '#/components/parameters/SourceId'}]
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {lift_ban: {type: boolean, default: true}}}
+      responses: {"204": {description: ok}}
+
+  /admin/merge-proposals/{proposal_id}/revert:
+    post:
+      tags: [admin]
+      summary: 撤销合并（按 original_assignment_id 搬回来源）
+      parameters: [{$ref: '#/components/parameters/ProposalId'}]
+      responses: {"204": {description: ok}}
+
+  /admin/deleted:
+    get:
+      tags: [admin]
+      summary: 最近被投票删除的内容，供复核
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Source'}}
+
+  /admin/announcements:
+    post:
+      tags: [admin]
+      summary: 发布规则变更公告（生效时间须 ≥ 7 天后）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, body, effective_at]
+              properties:
+                title: {type: string}
+                body: {type: string}
+                effective_at: {type: string, format: date-time}
+      responses: {"201": {description: ok}}
+
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+    worker: {type: http, scheme: bearer, description: WORKER_TOKEN（仅电脑 worker）}
+
+  parameters:
+    ClassId: {name: class_id, in: path, required: true, schema: {type: integer}}
+    AssignmentId: {name: assignment_id, in: path, required: true, schema: {type: integer}}
+    SourceId: {name: source_id, in: path, required: true, schema: {type: integer}}
+    ProposalId: {name: proposal_id, in: path, required: true, schema: {type: integer}}
+
+  responses:
+    Error:
+      description: 错误
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [need_invite_or_campus, invite_invalid, nickname_taken, bad_credentials,
+                     not_member, post_banned, daily_limit, ddl_required, already_voted,
+                     self_thanks, ai_offline, too_large, forbidden, not_found]
+        message: {type: string, description: 可直接展示的中文}
+
+    Tokens:
+      type: object
+      properties:
+        access_token: {type: string}
+        refresh_token: {type: string}
+        expires_in: {type: integer}
+
+    Semester:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        starts_on: {type: string, format: date}
+        ends_on: {type: string, format: date}
+        archived: {type: boolean}
+
+    Me:
+      type: object
+      properties:
+        id: {type: integer}
+        nickname: {type: string}
+        role: {type: string, enum: [user, admin]}
+        registered_via: {type: string, enum: [invite, campus, bootstrap]}
+        leaderboard_anonymous: {type: boolean}
+        invites_remaining: {type: integer}
+
+    SlotInput:
+      type: object
+      required: [name, room, weekday, start, end]
+      properties:
+        name: {type: string}
+        room: {type: string}
+        weekday: {type: integer, minimum: 1, maximum: 5}
+        start: {type: integer, minimum: 1, maximum: 12}
+        end: {type: integer, minimum: 1, maximum: 12}
+        truncated: {type: boolean, default: false}
+        teacher: {type: [string, "null"]}
+
+    Slot:
+      type: object
+      properties:
+        room: {type: string}
+        weekday: {type: integer}
+        start: {type: integer}
+        end: {type: integer}
+
+    Class:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        teacher: {type: [string, "null"]}
+        slots: {type: array, items: {$ref: '#/components/schemas/Slot'}}
+        member_count: {type: integer}
+
+    Attachment:
+      type: object
+      properties:
+        id: {type: integer}
+        kind: {type: string, enum: [image, file]}
+        url: {type: string}
+        thumb_url: {type: [string, "null"]}
+        bytes: {type: integer}
+
+    AssignmentCreate:
+      type: object
+      required: [title, ddl]
+      properties:
+        title: {type: string, maxLength: 80}
+        ddl: {type: string, format: date-time}
+        ddl_uncertain: {type: boolean, default: false}
+        body: {type: string, maxLength: 5000}
+        attachment_ids: {type: array, maxItems: 6, items: {type: integer}}
+        ai_job_id: {type: [integer, "null"], description: 若由 AI 草稿生成，便于追溯}
+
+    SourceCreate:
+      type: object
+      properties:
+        body: {type: string, maxLength: 5000}
+        stated_ddl: {type: [string, "null"], format: date-time}
+        attachment_ids: {type: array, maxItems: 6, items: {type: integer}}
+
+    Source:
+      type: object
+      properties:
+        id: {type: integer}
+        kind: {type: string, enum: [first, supplement]}
+        author_nickname: {type: string}
+        body: {type: string}
+        stated_ddl: {type: [string, "null"], format: date-time}
+        attachments: {type: array, items: {$ref: '#/components/schemas/Attachment'}}
+        created_at: {type: string, format: date-time}
+        thanks_count: {type: integer}
+        thanked_by_me: {type: boolean}
+        voted_delete_by_me: {type: boolean}
+
+    AssignmentSummary:
+      type: object
+      properties:
+        id: {type: integer}
+        class_id: {type: integer}
+        class_name: {type: string}
+        title: {type: string}
+        ddl: {type: string, format: date-time}
+        ddl_uncertain: {type: boolean}
+        ddl_conflict: {type: boolean, description: 标红}
+        done: {type: boolean, description: 仅本人}
+        source_count: {type: integer}
+        reminder_text: {type: [object, "null"], description: "预生成文案，键为 2d、1d、12h，可空"}
+        updated_at: {type: string, format: date-time}
+
+    Assignment:
+      allOf:
+        - $ref: '#/components/schemas/AssignmentSummary'
+        - type: object
+          properties:
+            first_poster_nickname: {type: string}
+            sources: {type: array, items: {$ref: '#/components/schemas/Source'}}
+            merged_from: {type: array, items: {type: integer}}
+            pending_merges: {type: array, items: {$ref: '#/components/schemas/MergeProposal'}}
+
+    MergeProposal:
+      type: object
+      properties:
+        id: {type: integer}
+        from_id: {type: integer}
+        to_id: {type: integer}
+        status: {type: string, enum: [pending, applied, rejected, reverted, expired]}
+        votes: {type: integer}
+        needed_votes: {type: integer, const: 3}
+
+    PointsEntry:
+      type: object
+      properties:
+        delta: {type: integer}
+        reason: {type: string, enum: [first_post, supplement, thanks, deleted_revoke, deleted_penalty, restore_refund, merge_adjust]}
+        status: {type: string, enum: [pending, settled, void]}
+        class_name: {type: string}
+        assignment_title: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+
+    Notice:
+      type: object
+      properties:
+        id: {type: integer}
+        kind: {type: string}
+        payload: {type: object}
+        created_at: {type: string, format: date-time}
+        read: {type: boolean}
+
+    AiJob:
+      type: object
+      properties:
+        id: {type: integer}
+        kind: {type: string}
+        status: {type: string, enum: [queued, running, done, failed, expired]}
+        input: {type: object, description: 仅 worker 领取时返回}
+        output: {type: [object, "null"]}
+        error: {type: [string, "null"]}
