@@ -12,6 +12,8 @@ app/src/main/java/com/swufe/homework/
   ui/auth       登录、注册（校园网检测 + 邀请码）、恢复码展示、找回
   ui/timetable  课表网格、截图导入与确认、手动添加、班级页外壳
   ui/me         我的、设置、邀请码
+  ui/homework   WS5：首页 feed、班级页内容（按周浏览作业、榜单）、发布/补充/编辑、作业详情、积分、提醒引导
+  reminder      WS5：本地提醒（AlarmManager 闹钟、通知、标记完成、开机重建、WorkManager 同步）
   ui/nav        路由与导航图（与 WS5 的约定见 NAVIGATION.md）
 ```
 
@@ -49,3 +51,19 @@ cd android
 - AI 离线时导入按钮置灰并提示「电脑未在线，请手动添加」；手动添加可用 `/classes/search` 搜已有课一键填入。
 - 班级页「不是我的班」→ `DELETE /me/classes/{id}`（服务端记住退出，重新导入不自动加回，可搜索手动加入）。
 - 启动时检查 GitHub Releases latest（自动检查最多 6 小时一次，避免匿名 API 限额），版本更高则提示下载 APK。
+
+## 已实现（WS5）
+- 首页：`/feed` 跨课程按 DDL 升序；DDL 不一致（`ddl_conflict`）标红、`ddl_uncertain` 显示「待确认」；勾选或左滑标记完成；可切换显示已完成；下拉刷新。
+- 班级页（填进 WS4 的 `ClassPageScreen` body）：按周浏览作业（`from`/`to` 为周一到周日，按 DDL 日期分组）；周榜 / 学期榜（匿名显示服务端给的「匿名同学」）、课代表；「发布作业」入口。
+- 发布：粘贴文字、选图（最多 6 张，单张 ≤ 10 MB，上传前压到约 1 MB）。AI 在线时「智能识别」→ `parse_assignment` 草稿回填，`uncertain` 字段标黄；离线按钮置灰。
+  新建必须填 DDL（api.yaml `AssignmentCreate` 要求 ddl 必填，有图片时同样必填）。
+  发布前 `candidates` 查重，在线时再跑 `dedupe_review`（AI 认为同一份的排前面），用户选「作为补充」或「仍然新建」；在线时先跑 `spam_check`，可疑只提示本人。
+- 作业详情：来源列表（首发/补充、昵称、时间、TA 看到的 DDL、缩略图点开全屏缩放）、谢谢、补充、编辑/删除自己的来源、提议合并（选同班另一条作业）、合并提议的赞同 / 首发者同意；
+  删除投票：红色按钮 → 固定文案弹窗 → 确认按钮倒数 3 秒。
+- 积分：「我的积分」（学期总分、今日已得 / 30、明细分页）、「积分规则」（`app/src/main/assets/points-rules.md` 的 `---` 之前部分；该文件是 `docs/points-rules.md` 的副本，单测校验两者一致，改规则时一起复制）。
+- 提醒：`/sync` 增量同步写本地 Room 表 `assignment`（v2，只存标题、班级、DDL、完成、提醒文案）；每条未完成作业用 `setExactAndAllowWhileIdle` 设三次闹钟：
+  DDL 前 2 天 09:00、前 1 天 09:00、前 12 小时（Asia/Shanghai），已过的跳过，相隔不足 1 小时的合并（保留较晚那次）。
+  通知文案优先 `reminder_text[2d|1d|12h]`，否则内置模板；点击进入作业详情；「标记完成」本地立即停止提醒，接口由 WorkManager 调（断网自动重试）。
+  同步时机：每 4 小时（WorkManager，联网时）、打开 App、开机 / 升级 / 改时间或时区 / 精确闹钟权限变化（同时重建闹钟）。退出登录清空闹钟、通知和同步游标。
+- 首次进入主界面打开「提醒设置」引导：通知权限、精确闹钟、电池优化白名单、自启动（小米、华为、荣耀、OPPO/realme、一加、vivo/iQOO、魅族、三星，打不开就进应用详情页）；之后在「我的 → 提醒设置」。
+- 图片用带证书固定的 OkHttp 加载（Coil `ImageLoaderFactory`），相对 URL（`/files/...`）补成服务器地址。

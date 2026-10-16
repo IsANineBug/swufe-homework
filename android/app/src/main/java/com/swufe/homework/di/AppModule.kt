@@ -9,7 +9,10 @@ import com.swufe.homework.data.api.GitHubApi
 import com.swufe.homework.data.api.PinnedTrust
 import com.swufe.homework.data.api.SwufeApi
 import com.swufe.homework.data.api.TokenAuthenticator
+import coil.ImageLoader
+import com.swufe.homework.data.api.HomeworkApi
 import com.swufe.homework.data.local.AppDatabase
+import com.swufe.homework.data.local.AssignmentDao
 import com.swufe.homework.data.local.TimetableDao
 import dagger.Module
 import dagger.Provides
@@ -86,8 +89,24 @@ object AppModule {
 
     @Provides @Singleton
     fun db(@ApplicationContext ctx: Context): AppDatabase =
-        Room.databaseBuilder(ctx, AppDatabase::class.java, "swufe.db").build()
+        Room.databaseBuilder(ctx, AppDatabase::class.java, "swufe.db")
+            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .build()
 
     @Provides
     fun timetableDao(db: AppDatabase): TimetableDao = db.timetableDao()
+
+    @Provides
+    fun assignmentDao(db: AppDatabase): AssignmentDao = db.assignmentDao()
+
+    @Provides @Singleton
+    fun homeworkApi(r: Retrofit): HomeworkApi = r.create(HomeworkApi::class.java)
+
+    /**
+     * 图片走服务器签名 URL（/files/...），证书是自签的，必须用带公钥固定的客户端加载；
+     * 签名在 query 里，不需要 Bearer，所以用基础客户端。
+     */
+    @Provides @Singleton
+    fun imageLoader(@ApplicationContext ctx: Context, @ServerBase client: OkHttpClient): ImageLoader =
+        ImageLoader.Builder(ctx).okHttpClient(client).crossfade(true).build()
 }

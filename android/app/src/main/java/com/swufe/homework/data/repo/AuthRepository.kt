@@ -19,6 +19,7 @@ class AuthRepository @Inject constructor(
     private val api: SwufeApi,
     private val tokens: TokenStore,
     private val db: AppDatabase,
+    private val reminders: ReminderSync,
 ) {
     val loggedIn = tokens.loggedIn
 
@@ -57,11 +58,13 @@ class AuthRepository @Inject constructor(
     /** 只注销本机：带上本机 refresh_token（issue #4 裁决 5）。 */
     suspend fun logout() {
         tokens.refreshToken()?.let { rt -> runCatching { api.logout(LogoutRequest(rt)) } }
+        reminders.reset() // 本地提醒随登录态一起清掉（WS5）
         tokens.clear()
         withContext(Dispatchers.IO) { db.clearAllTables() }
     }
 
     suspend fun clearLocal() {
+        reminders.reset()
         tokens.clear()
         withContext(Dispatchers.IO) { db.clearAllTables() }
     }

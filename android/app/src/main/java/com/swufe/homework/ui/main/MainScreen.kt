@@ -35,9 +35,13 @@ fun MainScreen(
     onSettings: () -> Unit,
     onInvites: () -> Unit,
     onLoggedOut: () -> Unit,
+    onPoints: () -> Unit = {},
+    onRules: () -> Unit = {},
+    onReminderGuide: () -> Unit = {},
     home: @Composable () -> Unit = { HomePlaceholder() },
 ) {
-    var tab by rememberSaveable { mutableStateOf(MainTab.Timetable) }
+    // WS5 接入首页后默认打开首页（作业列表）
+    var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -61,7 +65,7 @@ fun MainScreen(
             when (tab) {
                 MainTab.Home -> home()
                 MainTab.Timetable -> TimetableScreen(onImport, onManual, onOpenClass)
-                MainTab.Me -> MeScreen(onSettings, onInvites, onLoggedOut)
+                MainTab.Me -> MeScreen(onSettings, onInvites, onLoggedOut, onPoints = onPoints, onRules = onRules, onReminderGuide = onReminderGuide)
             }
         }
     }
