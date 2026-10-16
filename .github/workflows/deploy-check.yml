@@ -1,0 +1,30 @@
+name: deploy-check
+
+on:
+  pull_request:
+    paths: ["deploy/**", ".env.example", ".github/workflows/deploy-check.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy
+    steps:
+      - uses: actions/checkout@v4
+      - name: compose config
+        run: |
+          cp ../.env.example .env
+          docker compose config -q
+      - name: nginx -t
+        run: |
+          ./scripts/gen-cert.sh 127.0.0.1
+          docker run --rm --add-host server:127.0.0.1 \
+            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/certs:/etc/nginx/certs:ro" \
+            nginx:1.27-alpine nginx -t
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
