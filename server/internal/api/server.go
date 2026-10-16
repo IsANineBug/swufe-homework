@@ -15,6 +15,7 @@ import (
 
 	"github.com/IsANineBug/swufe-homework/server/internal/auth"
 	"github.com/IsANineBug/swufe-homework/server/internal/config"
+	"github.com/IsANineBug/swufe-homework/server/internal/files"
 	"github.com/IsANineBug/swufe-homework/server/internal/httpx"
 	"github.com/IsANineBug/swufe-homework/server/internal/netx"
 )
@@ -26,25 +27,34 @@ type Server struct {
 	RegLimiter *netx.Limiter
 	// FailLimiter 登录 / 恢复码失败次数，按「昵称+IP」计，只记失败
 	FailLimiter *netx.Limiter
-	Now         func() time.Time
+	// WS2：文件 URL 签名、每人上传频率（每小时 60 次）
+	Files         *files.Signer
+	UploadLimiter *netx.Limiter
+	Now           func() time.Time
 }
 
 func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	return &Server{
-		Cfg:         cfg,
-		DB:          db,
-		Tokens:      auth.NewIssuer(cfg.JWTSecret, cfg.AccessTTL),
-		RegLimiter:  netx.NewLimiter(cfg.RegisterPerIPHour, time.Hour),
-		FailLimiter: netx.NewLimiter(LoginFailuresPerHour, time.Hour),
-		Now:         time.Now,
+		Cfg:           cfg,
+		DB:            db,
+		Tokens:        auth.NewIssuer(cfg.JWTSecret, cfg.AccessTTL),
+		RegLimiter:    netx.NewLimiter(cfg.RegisterPerIPHour, time.Hour),
+		FailLimiter:   netx.NewLimiter(LoginFailuresPerHour, time.Hour),
+		Files:         files.NewSigner(cfg.FileURLSecret, cfg.JWTSecret, cfg.FileURLTTL),
+		UploadLimiter: netx.NewLimiter(UploadsPerHour, time.Hour),
+		Now:           time.Now,
 	}
 }
+
+// UploadsPerHour 每人每小时最多上传次数。
+const UploadsPerHour = 60
 
 // Router 返回完整路由。/healthz 在根路径，业务接口在 /api/v1。
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, s.realIP, requestLogger, middleware.Recoverer)
 	r.Get("/healthz", s.healthz)
+	r.Get("/files/*", s.serveFile)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) { httpx.Fail(w, r, httpx.ErrNotFound) })
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.E(http.StatusMethodNotAllowed, "method_not_allowed", "不支持的请求方法"))
@@ -74,6 +84,40 @@ func (s *Server) Router() http.Handler {
 			r.Get("/classes/search", s.searchClasses)
 			r.Get("/classes/{class_id}", s.getClass)
 			r.Post("/classes/{class_id}/join", s.joinClass)
+
+			// WS2：作业、来源、完成状态
+			r.Get("/classes/{class_id}/assignments", s.listClassAssignments)
+			r.Post("/classes/{class_id}/assignments", s.createAssignment)
+			r.Post("/classes/{class_id}/assignments/candidates", s.assignmentCandidates)
+			r.Get("/classes/{class_id}/leaderboard", s.leaderboard)
+			r.Get("/feed", s.feed)
+			r.Get("/sync", s.sync)
+			r.Get("/assignments/{assignment_id}", s.getAssignment)
+			r.Patch("/assignments/{assignment_id}", s.patchAssignment)
+			r.Post("/assignments/{assignment_id}/sources", s.addSource)
+			r.Put("/assignments/{assignment_id}/done", s.setDone(true))
+			r.Delete("/assignments/{assignment_id}/done", s.setDone(false))
+			r.Patch("/sources/{source_id}", s.patchSource)
+			r.Delete("/sources/{source_id}", s.deleteSource)
+			r.Post("/uploads", s.upload)
+			// WS2：社区与积分
+			r.Post("/sources/{source_id}/thanks", s.thankSource)
+			r.Post("/sources/{source_id}/delete-votes", s.voteDelete)
+			r.Post("/merge-proposals", s.proposeMerge)
+			r.Post("/merge-proposals/{proposal_id}/accept", s.acceptMerge)
+			r.Post("/merge-proposals/{proposal_id}/votes", s.voteMerge)
+			r.Get("/me/points", s.myPoints)
+
+			// WS2：管理员
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(RequireAdmin)
+				r.Post("/sources/{source_id}/restore", s.adminRestoreSource)
+				r.Post("/merge-proposals/{proposal_id}/revert", s.adminRevertMerge)
+				r.Get("/deleted", s.adminDeleted)
+				r.Post("/announcements", s.adminAnnounce)
+				r.Get("/class-merges", s.adminClassMerges)
+				r.Post("/class-merges/{merge_id}/revert", s.adminRevertClassMerge)
+			})
 		})
 	})
 	return r

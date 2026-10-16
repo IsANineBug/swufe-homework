@@ -39,7 +39,8 @@ jobs:
         with:
           go-version: "1.23"
           cache-dependency-path: server/go.sum
-      - run: go test -race -count=1 ./...
+      # -p 1：多个包的集成测试共用同一个库（testdb 会清表），不能并行
+      - run: go test -race -count=1 -p 1 ./...
       - uses: golangci/golangci-lint-action@v6
         with:
           version: v1.61

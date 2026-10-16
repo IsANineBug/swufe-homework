@@ -382,6 +382,9 @@ paths:
     get:
       tags: [assignments]
       summary: 班级页，按日期查看
+      description: |
+        按 DDL 日期（Asia/Shanghai）筛选，from/to 含两端；默认今天前 7 天到后 60 天，范围最多 120 天，最多 500 条。
+        班级成员或管理员可看；已合并的班按保留班返回。非成员 403 not_member。
       parameters:
         - {$ref: '#/components/parameters/ClassId'}
         - {name: from, in: query, schema: {type: string, format: date}}
@@ -396,8 +399,10 @@ paths:
       tags: [assignments]
       summary: 新建作业（首发）
       description: |
-        必须是班级成员；禁发期内 403 post_banned；当天在该班已发 5 条（被删除的不计）429 daily_limit。
-        有图片时 ddl 必填。发布前 App 应先调 /candidates。
+        必须是班级成员（403 not_member）；禁发期内 403 post_banned；当天在该班已发 5 条（首发与补充合计，
+        按 Asia/Shanghai 日期，被删除的不计）429 daily_limit。缺 ddl → 400 ddl_required（有图片时尤其必须）。
+        attachment_ids 必须是本人上传、尚未使用的附件，否则 400 bad_attachment。班级不属于当前学期 409 class_archived。
+        首发积分 +10 写 pending，24 小时后结算。发布前 App 应先调 /candidates。
       parameters: [{$ref: '#/components/parameters/ClassId'}]
       requestBody:
         required: true
@@ -406,13 +411,19 @@ paths:
             schema: {$ref: '#/components/schemas/AssignmentCreate'}
       responses:
         "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Assignment'}}}}
+        "400": {$ref: '#/components/responses/Error'}
         "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
         "429": {$ref: '#/components/responses/Error'}
 
   /classes/{class_id}/assignments/candidates:
     post:
       tags: [assignments]
       summary: 发布前查重，最多 3 条（近 7 天、DDL ±1 天、标题相似度）
+      description: |
+        范围：本班近 7 天发布、在世未合并的作业；给了 ddl 时只看 DDL 前后 1 天内的。
+        相似度：标题去掉空格、标点、大小写与全半角差异后的字符二元组 Dice 系数，≥ 0.3 才返回，按相似度降序。
+        （中文标题下比 pg_trgm 稳定，且不依赖数据库 locale。）
       parameters: [{$ref: '#/components/parameters/ClassId'}]
       requestBody:
         required: true
@@ -434,6 +445,9 @@ paths:
   /classes/{class_id}/leaderboard:
     get:
       tags: [moderation]
+      description: |
+        班级成员或管理员可看。周榜 = 本周一 00:00（Asia/Shanghai）起记入的已结算积分；学期榜 = 本班全部已结算积分（班级只属于一个学期）。
+        rank 并列同名次；返回前 100 名，本人不在前 100 时额外附上本人一行。课代表 = 学期榜第一（> 0 分），同分取先达到者。
       parameters:
         - {$ref: '#/components/parameters/ClassId'}
         - {name: scope, in: query, required: true, schema: {type: string, enum: [week, semester]}}
@@ -460,6 +474,7 @@ paths:
     get:
       tags: [assignments]
       summary: 首页：我所有班级的未过期作业，按 DDL 升序，含我的完成状态
+      description: 当前学期、在班（未点「不是我的班」）的班级；DDL ≥ 现在；默认不含本人已完成的，最多 300 条。
       parameters:
         - {name: include_done, in: query, schema: {type: boolean, default: false}}
       responses:
@@ -473,6 +488,12 @@ paths:
     get:
       tags: [assignments]
       summary: 增量同步（用于本地提醒）。返回 since 之后变更的我班级的作业
+      description: |
+        不带 since：返回全部 DDL ≥ 现在 − 1 天的在世作业，removed_ids 为空。
+        带 since：changed = updated_at > since 的在世作业（发布、补充、改标题/DDL、标红变化、合并进来、提醒文案写入都会刷新），
+        以及本人在 since 之后标记完成的；removed_ids = since 之后被删除或被合并走的作业。
+        返回的 now 比服务器时间早 30 秒，下次用它作 since；边界上的作业可能重复下发，按 id 覆盖即可。
+        本人在别的设备「取消完成」不会出现在增量里（下次全量同步时纠正）。
       parameters:
         - {name: since, in: query, schema: {type: string, format: date-time}}
       responses:
@@ -490,13 +511,18 @@ paths:
   /assignments/{assignment_id}:
     get:
       tags: [assignments]
+      description: 班级成员或管理员可看。已被合并的作业返回合并目标（id 不同，merged_from 含请求的 id）；已删除 404。
       parameters: [{$ref: '#/components/parameters/AssignmentId'}]
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Assignment'}}}}
+        "403": {$ref: '#/components/responses/Error'}
         "404": {$ref: '#/components/responses/Error'}
     patch:
       tags: [assignments]
       summary: 首发者修改标题/DDL
+      description: |
+        只有首发者（created_by）可改，否则 403 forbidden。改 DDL 时首发来源的 stated_ddl 一并更新、
+        重算标红（任一来源声称的 DDL 与作业 DDL 相差 ≥ 1 分钟即标红）、清空 reminder_text；未给 ddl_uncertain 时改 DDL 视为已确认。
       parameters: [{$ref: '#/components/parameters/AssignmentId'}]
       requestBody:
         content:
@@ -506,6 +532,7 @@ paths:
               properties:
                 title: {type: string}
                 ddl: {type: string, format: date-time}
+                ddl_uncertain: {type: boolean}
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Assignment'}}}}
         "403": {$ref: '#/components/responses/Error'}
@@ -514,6 +541,9 @@ paths:
     post:
       tags: [assignments]
       summary: 给已有作业补充内容。stated_ddl 与作业 DDL 不一致时作业标红
+      description: |
+        须为班级成员；正文和附件不能都为空（400 bad_request）；禁发、每日 5 条同首发。补充积分 +3 写 pending，24 小时后结算。
+        给已合并作业补充时自动加到合并目标上。
       parameters: [{$ref: '#/components/parameters/AssignmentId'}]
       requestBody:
         required: true
@@ -522,7 +552,9 @@ paths:
             schema: {$ref: '#/components/schemas/SourceCreate'}
       responses:
         "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Source'}}}}
+        "400": {$ref: '#/components/responses/Error'}
         "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
         "429": {$ref: '#/components/responses/Error'}
 
   /assignments/{assignment_id}/done:
@@ -533,7 +565,7 @@ paths:
       responses: {"204": {description: ok}}
     delete:
       tags: [assignments]
-      summary: 取消完成
+      summary: 取消完成（合并前在被合并作业上的完成记录一并取消）
       parameters: [{$ref: '#/components/parameters/AssignmentId'}]
       responses: {"204": {description: ok}}
 
@@ -541,6 +573,9 @@ paths:
     patch:
       tags: [assignments]
       summary: 作者编辑自己的来源
+      description: |
+        只改给出的字段；给了 attachment_ids 则整体替换附件（去掉的附件解绑，24 小时后清理）。stated_ddl 变化会重算标红。
+        非作者 403 forbidden。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
       requestBody:
         content:
@@ -551,13 +586,20 @@ paths:
     delete:
       tags: [assignments]
       summary: 作者删除自己的来源（不扣分，但该来源积分作废）
+      description: 幂等。作业没有剩余来源时随之删除（出现在 /sync 的 removed_ids）。作者删除的内容管理员不恢复。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
-      responses: {"204": {description: ok}}
+      responses:
+        "204": {description: ok}
+        "403": {$ref: '#/components/responses/Error'}
 
   /uploads:
     post:
       tags: [assignments]
       summary: 上传图片/附件（App 已压缩到约 1MB；服务器上限 10MB，生成缩略图）
+      description: |
+        按文件头识别类型，只收 JPEG、PNG、WebP（kind=image）和 PDF（kind=file），其他 415 bad_file_type；超过 10MB 413 too_large。
+        图片生成宽 400px 的 JPEG 缩略图（超过 4000 万像素的不生成，thumb_url 为 null）。每人每小时最多 60 次，超出 429 rate_limited。
+        附件 24 小时内未挂到作业或补充上会被清理。url / thumb_url 见 /files。
       requestBody:
         required: true
         content:
@@ -574,14 +616,43 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Attachment'}
         "413": {$ref: '#/components/responses/Error'}
+        "415": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
+
+  /files/{path}:
+    servers:
+      - url: https://{host}:{port}
+        variables:
+          host: {default: 127.0.0.1}
+          port: {default: "8443"}
+    get:
+      tags: [assignments]
+      security: []
+      summary: 下载附件（过期签名 URL，issue #4 裁决 4）
+      description: |
+        不在 /api/v1 下：url 形如 /files/<相对 UPLOAD_DIR 的路径>?exp=<unix 秒>&sig=<base64url(HMAC-SHA256)>，
+        App 用服务器 origin（https://<IP>:<端口>）拼接。签名覆盖「路径 + 换行 + exp」，密钥 FILE_URL_SECRET（未设置时由 JWT_SECRET 派生）。
+        有效期 1 小时（exp 取整到 10 分钟，便于缓存）；过期、签名不对、路径含 .. 一律 403。
+        服务器验签后返回 X-Accel-Redirect: /_protected/<相对路径>，由 nginx 直接读文件（Cache-Control private, max-age=600）。
+      parameters:
+        - {name: path, in: path, required: true, schema: {type: string}}
+        - {name: exp, in: query, required: true, schema: {type: integer}}
+        - {name: sig, in: query, required: true, schema: {type: string}}
+      responses:
+        "200": {description: 文件内容（经 nginx）}
+        "403": {$ref: '#/components/responses/Error'}
 
   /sources/{source_id}/thanks:
     post:
       tags: [moderation]
       summary: 谢谢（不能谢自己，每人每条一次）
+      description: |
+        须为班级成员。谢自己 409 self_thanks，重复 409 already_thanked。作者立即 +1（每条来源谢谢分最多 10，计入每日 30 分上限，
+        超出部分记 0 分）。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
       responses:
         "204": {description: ok}
+        "403": {$ref: '#/components/responses/Error'}
         "409": {$ref: '#/components/responses/Error'}
 
   /sources/{source_id}/delete-votes:
@@ -592,6 +663,8 @@ paths:
         门槛 = clamp(ceil(班级成员数 × 10%), 3, 6)。达到门槛即软删除，
         收回积分并扣 10 分；30 天内第 3 次被删 → 该班禁发 7 天；
         作者为邀请注册时通知其直接邀请人。
+        须为班级成员；投自己的内容 409 self_vote（请直接删除），重复 409 already_voted。
+        作者收到 content_deleted 通知，禁发时收到 ban 通知，邀请人收到 invitee_violation 通知。
         App 必须先弹出警示，确认按钮倒数 3 秒。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
       responses:
@@ -611,6 +684,10 @@ paths:
     post:
       tags: [moderation]
       summary: 提议把 from 合并到 to（同一班级）
+      description: |
+        须为班级成员；两条作业都在世、未合并、同班（否则 409 merge_stale / 400）。同一对已有进行中的提议 409 already_proposed。
+        提议人算第 1 票；from 的首发者收到 merge_request 通知。提议人就是 from 的首发者时视同同意，立即执行。
+        7 天未执行自动 expired。
       requestBody:
         required: true
         content:
@@ -623,15 +700,20 @@ paths:
                 to_id: {type: integer}
       responses:
         "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/MergeProposal'}}}}
+        "400": {$ref: '#/components/responses/Error'}
+        "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
 
   /merge-proposals/{proposal_id}/accept:
     post:
       tags: [moderation]
       summary: 被合并作业（from）的首发者同意，立即执行
+      description: 提议已结束 409 merge_closed；作业已被删除或合并 409 merge_stale（提议随之 rejected）。
       parameters: [{$ref: '#/components/parameters/ProposalId'}]
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/MergeProposal'}}}}
         "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
 
   /merge-proposals/{proposal_id}/votes:
     post:
@@ -640,9 +722,13 @@ paths:
       description: |
         执行：搬来源（不删内容）、from 标记 merged_into、完成状态并集、
         DDL 不一致则 to 标红、积分按 points-rules 调整、推送 sync 变更。
+        from 的首发者投赞同票等同 accept。重复投票 409 already_voted；其余错误同 accept。
+        执行后同一 from 的其他进行中提议改为 expired，from 的首发者收到 merge_applied 通知。
       parameters: [{$ref: '#/components/parameters/ProposalId'}]
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/MergeProposal'}}}}
+        "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
 
   /ai/status:
     get:
@@ -728,6 +814,9 @@ paths:
     post:
       tags: [admin]
       summary: 恢复误删内容，返还积分，可选解除禁发
+      description: |
+        只恢复被投票删除的内容（作者自删 409 not_restorable），幂等。清空该来源的删除票；作废的积分恢复
+        （未到 24 小时的回到 pending），扣的 10 分写 restore_refund 返还；lift_ban 解除作者在该班的禁发。作者收到 content_restored 通知。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
       requestBody:
         content:
@@ -739,13 +828,57 @@ paths:
     post:
       tags: [admin]
       summary: 撤销合并（按 original_assignment_id 搬回来源）
+      description: |
+        按执行时记下的快照（merge_proposals.snapshot）还原：搬回来源、from 首发来源改回 first、首发积分恢复、
+        合并时新记的补充分作废、合并时补上的完成状态去掉、两边重算标红。只能撤销 applied 的提议（否则 409 merge_closed）；
+        目标作业之后又被合并走时 409 merge_chain，先撤销后一次。
       parameters: [{$ref: '#/components/parameters/ProposalId'}]
-      responses: {"204": {description: ok}}
+      responses:
+        "204": {description: ok}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /admin/class-merges:
+    get:
+      tags: [admin]
+      summary: 最近 100 次班级自动合并（含已撤销），供复核（issue #4 裁决 10）
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: integer}
+                    from_class_id: {type: integer}
+                    from_name: {type: string}
+                    into_class_id: {type: integer}
+                    into_name: {type: string}
+                    triggered_by_nickname: {type: [string, "null"]}
+                    created_at: {type: string, format: date-time}
+                    undone_at: {type: [string, "null"], format: date-time}
+
+  /admin/class-merges/{merge_id}/revert:
+    post:
+      tags: [admin]
+      summary: 撤销班级自动合并
+      description: |
+        按 class_merges.snapshot 把时段、作业、积分流水、禁发记录、子合并班搬回 from，from 成员按快照重建，
+        into 中因合并新增的成员移除、原成员恢复合并前状态，into 课名/教师恢复；两个班的作业刷新 updated_at 供 /sync。
+        已撤销 409 merge_closed；into 之后又被合并走 409 merge_chain。
+      parameters:
+        - {name: merge_id, in: path, required: true, schema: {type: integer}}
+      responses:
+        "204": {description: ok}
+        "409": {$ref: '#/components/responses/Error'}
 
   /admin/deleted:
     get:
       tags: [admin]
       summary: 最近被投票删除的内容，供复核
+      description: 最近 30 天、最多 200 条，按删除时间倒序；比普通 Source 多 assignment_id、deleted_at、deleted_reason。
       responses:
         "200":
           description: ok
@@ -757,6 +890,7 @@ paths:
     post:
       tags: [admin]
       summary: 发布规则变更公告（生效时间须 ≥ 7 天后）
+      description: 不足 7 天 400 effective_too_soon。同时给所有未停用账号写一条 announcement 通知（/me/notices）。
       requestBody:
         required: true
         content:
@@ -768,7 +902,9 @@ paths:
                 title: {type: string}
                 body: {type: string}
                 effective_at: {type: string, format: date-time}
-      responses: {"201": {description: ok}}
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {type: object, properties: {id: {type: integer}}}}}}
+        "400": {$ref: '#/components/responses/Error'}
 
 components:
   securitySchemes:
@@ -800,7 +936,9 @@ components:
                      self_thanks, ai_offline, too_large, forbidden, not_found,
                      unauthorized, token_expired, bad_refresh_token, bad_recovery_code, bad_nickname,
                      bad_password, bad_request, rate_limited, invite_quota_exhausted, invalid_slot,
-                     no_semester, nickname_reserved, class_archived, method_not_allowed, internal]
+                     no_semester, nickname_reserved, class_archived, method_not_allowed, internal,
+                     bad_attachment, bad_file_type, already_thanked, self_vote, already_proposed, merge_stale,
+                     merge_closed, merge_chain, not_restorable, effective_too_soon]
         message: {type: string, description: 可直接展示的中文}
 
     Tokens:
@@ -867,8 +1005,8 @@ components:
       properties:
         id: {type: integer}
         kind: {type: string, enum: [image, file]}
-        url: {type: string}
-        thumb_url: {type: [string, "null"]}
+        url: {type: string, description: "相对服务器根的签名地址 /files/…?exp=&sig=，1 小时内有效"}
+        thumb_url: {type: [string, "null"], description: "同 url；PDF 和超大图片为 null"}
         bytes: {type: integer}
 
     AssignmentCreate:
@@ -902,6 +1040,9 @@ components:
         thanks_count: {type: integer}
         thanked_by_me: {type: boolean}
         voted_delete_by_me: {type: boolean}
+        assignment_id: {type: integer, description: 仅 /admin/deleted 返回}
+        deleted_at: {type: string, format: date-time, description: 仅 /admin/deleted 返回}
+        deleted_reason: {type: string, enum: [vote, admin], description: 仅 /admin/deleted 返回}
 
     AssignmentSummary:
       type: object
@@ -916,7 +1057,7 @@ components:
         done: {type: boolean, description: 仅本人}
         source_count: {type: integer}
         reminder_text: {type: [object, "null"], description: "预生成文案，键为 2d、1d、12h，可空"}
-        updated_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time, description: /sync 增量依据}
 
     Assignment:
       allOf:
@@ -930,6 +1071,7 @@ components:
 
     MergeProposal:
       type: object
+      description: votes 含提议人；首发者同意时不看票数。
       properties:
         id: {type: integer}
         from_id: {type: integer}
@@ -950,6 +1092,9 @@ components:
 
     Notice:
       type: object
+      description: |
+        kind：merge_request（有人提议合并你的作业）、merge_applied、content_deleted、content_restored、ban（禁发，payload.ends_at）、
+        invitee_violation（你邀请的人内容被删，payload.invitee_nickname）、announcement（规则公告）。
       properties:
         id: {type: integer}
         kind: {type: string}
