@@ -56,7 +56,11 @@ class AssignmentRepository @Inject constructor(
 
     suspend fun detail(id: Int): Result<Assignment> =
         apiCall { api.assignment(id) }
-            .onSuccess { reminders.apply(listOf(it.toSummary())) }
+            .onSuccess {
+                // 已被合并：返回的是合并目标，旧 id 的提醒立即取消，不等 /sync 的 removed_ids
+                if (it.id != id) reminders.forget(id)
+                reminders.apply(listOf(it.toSummary()))
+            }
             .onFailure { if ((it as? ApiException)?.http == 404) reminders.forget(id) }
 
     // ---- 发布 / 补充 / 编辑 ----

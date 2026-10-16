@@ -25,6 +25,11 @@ class DetailViewModel @Inject constructor(
     private val account: AccountRepository,
 ) : ViewModel() {
     val id = saved.toRoute<Routes.AssignmentDetail>().id
+
+    // 注意：必须写在 init { load() } 之前（Kotlin 按书写顺序初始化，load 在 Main.immediate 上同步读 curId）。
+    /** 当前作业 id：请求的作业已被合并时，接口返回合并目标（id 不同），之后一律以目标 id 为准。 */
+    var curId: Int = id
+        private set
     val me = account.me
 
     var a by mutableStateOf<Assignment?>(null); private set
@@ -45,15 +50,11 @@ class DetailViewModel @Inject constructor(
     /** 从补充/编辑页返回时刷新。 */
     fun onResume() { if (resumed) load() else resumed = true }
 
-    /** 当前作业 id：请求的作业已被合并时，接口返回合并目标（id 不同），之后一律以目标 id 为准。 */
-    var curId: Int = id
-        private set
-
     fun load() {
         loading = true
         viewModelScope.launch {
             repo.detail(curId)
-                .onSuccess { curId = it.id; a = it; error = null }
+                .onSuccess { curId = it.id; a = it; error = null; gone = false }
                 .onFailure {
                     error = it.userMessage
                     if ((it as? com.swufe.homework.data.api.ApiException)?.http == 404) gone = true
