@@ -1,0 +1,3 @@
+-- 仅在数据目录首次初始化时执行
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
