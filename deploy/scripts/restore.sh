@@ -4,6 +4,7 @@ set -euo pipefail
 FILE="${1:?用法: $0 <备份文件.dump>}"
 DEPLOY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DEPLOY_DIR"
+# shellcheck source=/dev/null
 set -a; . ./.env; set +a
 DB="${POSTGRES_DB:-homework}"; DBUSER="${POSTGRES_USER:-homework}"
 

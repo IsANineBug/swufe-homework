@@ -11,6 +11,7 @@ mkdir -p "$BACKUP_DIR"
 umask 077
 
 cd "$DEPLOY_DIR"
+# shellcheck source=/dev/null
 set -a; . ./.env; set +a
 DB="${POSTGRES_DB:-homework}"; DBUSER="${POSTGRES_USER:-homework}"
 TS="$(TZ=Asia/Shanghai date +%Y%m%d-%H%M)"
