@@ -13,3 +13,5 @@
 | 2026-10-16 | #5 [WS2] 作业、合并、删除、积分（07f33c4） | 通过 | 无阻塞；建议：签名 URL exp 未按 10 分钟取整（files.go:46）、自动合并班级未刷新 updated_at（import.go:504）、恢复积分与日上限（points.go:73/204）、ai-contract/workstreams 仍写 pg_trgm |
 | 2026-10-16 | #6 [WS5] Android 作业、社区、提醒（0d38ebf） | 需修改 | ReminderSync.kt:55/97 本地班级列表过期时误删作业与提醒；DetailViewModel.kt:69/106/113 打开已合并作业仍用旧 id；AppNavHost.kt:129 首启提醒引导系统返回后反复弹出 |
 | 2026-10-16 | #7 [WS3] AI worker 与 /ai、/worker（ffaabeb） | 需修改 | 单独对 main 测试全过；与已通过的 #5 合并后冲突：迁移同号 0003 且重复加 reminder_text（0003_ai_jobs_links.up.sql:15）、两套 files 签名不兼容（files.go:51）、写 AI 结果不刷新 updated_at 致 /sync 收不到（jobs.go:526/538）；另 WS5 dedupe_review 须改发 candidate_ids |
+| 2026-10-16 | #6 [WS5] 复审 0101e88 | 需修改 | 上轮 4 项已修；新引入：DetailViewModel.kt:49 curId 声明在 init{load()} 之后，load 时为 0，所有详情页显示「已被删除或合并」，onSuccess 未重置 gone |
+| 2026-10-16 | #7 [WS3] 复审 ecf6563（变基到 95a81c3） | 通过 | 迁移改 0004、共用 WS2 files.Signer、写回刷新 updated_at 并由 WS2 写路径触发，测试全过；非阻塞：jobs.go:539 DDL 毫秒比较、改标题未清 reminder_text |
