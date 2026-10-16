@@ -45,9 +45,15 @@ paths:
       tags: [auth]
       security: []
       summary: 注册。邀请码或校园网 IP 满足其一即可
+      parameters:
+        - {name: X-Bootstrap-Token, in: header, required: false, schema: {type: string}, description: 仅首个用户注册管理员时使用}
       description: |
-        无邀请码且不在校园网 → 403 need_invite_or_campus。
-        校园网注册 inviter_id 为空（邀请树根）。recovery_code 只返回这一次。
+        无邀请码且不在校园网 → 403 need_invite_or_campus；给了邀请码但无效且不在校园网 → 403 invite_invalid。
+        校园网注册 inviter_id 为空（邀请树根）。校园网与有效邀请码同时满足时按校园网注册，邀请码不消耗。
+        recovery_code 只返回这一次。
+        昵称 1–20 字；保留昵称（管理员、admin、官方、系统等，忽略大小写/全半角/空格比对）→ 400 nickname_reserved。
+        库里还没有任何用户时，带请求头 X-Bootstrap-Token（= BOOTSTRAP_ADMIN_TOKEN）注册即成为管理员。
+        同一 IP 每小时最多 30 次（可配置），超出 429 rate_limited。
       requestBody:
         required: true
         content:
@@ -70,8 +76,10 @@ paths:
                   - type: object
                     properties:
                       recovery_code: {type: string, description: 形如 XXXX-XXXX-XXXX-XXXX，仅显示一次}
+        "400": {$ref: '#/components/responses/Error'}
         "403": {$ref: '#/components/responses/Error'}
         "409": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
 
   /auth/login:
     post:
@@ -87,14 +95,17 @@ paths:
               properties:
                 nickname: {type: string}
                 password: {type: string}
+      description: 同一「昵称+IP」每小时最多失败 10 次，超出 429 rate_limited（成功登录不计数）。
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Tokens'}}}}
         "401": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
 
   /auth/refresh:
     post:
       tags: [auth]
       security: []
+      summary: 用 refresh token 换新的一对 token；旧 refresh token 立即作废（轮换）
       requestBody:
         required: true
         content:
@@ -109,6 +120,7 @@ paths:
       tags: [auth]
       security: []
       summary: 用恢复码重设密码，并返回新的恢复码
+      description: 成功后该用户所有设备下线（全部 refresh token 作废）。同一「昵称+IP」每小时最多失败 10 次，超出 429。
       requestBody:
         required: true
         content:
@@ -126,12 +138,27 @@ paths:
           content:
             application/json:
               schema: {type: object, properties: {new_recovery_code: {type: string}}}
+        "400": {$ref: '#/components/responses/Error'}
         "401": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
 
   /auth/logout:
     post:
       tags: [auth]
-      responses: {"204": {description: 已注销当前 refresh token}}
+      summary: 退出登录。带 refresh_token 只注销本机；all=true 注销本人全部设备
+      description: App 退出时带上本机的 refresh_token。两者都不给 → 400 bad_request。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token: {type: string, description: 本机的 refresh token}
+                all: {type: boolean, default: false, description: true = 注销全部设备}
+      responses:
+        "204": {description: 已注销}
+        "400": {$ref: '#/components/responses/Error'}
 
   /meta:
     get:
@@ -166,15 +193,17 @@ paths:
             schema:
               type: object
               properties:
-                nickname: {type: string}
+                nickname: {type: string, description: 规则同注册（1–20 字，不可用保留昵称）}
                 leaderboard_anonymous: {type: boolean}
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+        "400": {$ref: '#/components/responses/Error', description: bad_nickname / nickname_reserved}
+        "409": {$ref: '#/components/responses/Error', description: nickname_taken}
 
   /me/invites:
     get:
       tags: [me]
-      summary: 我的邀请码及使用情况（剩余名额 = invite_quota - 已用）
+      summary: 我的邀请码及使用情况（剩余名额 = 5 − 已生成的码数，未使用的码也占）
       responses:
         "200":
           description: ok
@@ -246,6 +275,7 @@ paths:
     delete:
       tags: [timetable]
       summary: 「不是我的班」——退出该班
+      description: 退出会被记住：之后导入课表不会自动加回（出现在 import 返回的 skipped 里），可用 POST /classes/{class_id}/join 手动加入。
       parameters: [{$ref: '#/components/parameters/ClassId'}]
       responses: {"204": {description: 已退出}}
 
@@ -259,7 +289,14 @@ paths:
         2. 课名相同，且任一时段「教室+星期+节次」与已有班重叠 → 加入该班，并补全该班缺的时段；
         3. 都不重叠 → 新建班，提交者为第一个成员；
         4. 同一组时段命中两个已有班 → 两班自动合并（成员、时段、作业归到较早创建的班）。
+           合并记录在 class_merges，管理员可撤销（撤销接口归管理员接口）。
         时段重叠但课名不同（多为识别错误）→ 返回 conflicts，该组不入库，由用户改名后重提。
+        截断课名（truncated=true）：
+        - 本次提交中，截断名与某完整课名相同或恰为唯一一个完整课名的前缀 → 并入该组；能匹配多个完整课名时单独成组；
+        - 只能用于加入唯一一个同名班：命中两个及以上不同名的班 → 不合并，该组的命中全部进 conflicts，不入库。
+        用户点过「不是我的班」的班不自动加回，放进 skipped。
+        400 invalid_slot：时段不合法（星期 1–5、节次 1–12 且起节 ≤ 止节、课名/教室非空、最多 60 条）。
+        409 no_semester：当前没有可导入的学期。
       requestBody:
         required: true
         content:
@@ -292,6 +329,12 @@ paths:
                       properties:
                         slot: {$ref: '#/components/schemas/SlotInput'}
                         existing_class: {$ref: '#/components/schemas/Class'}
+                  skipped:
+                    type: array
+                    description: 之前点过「不是我的班」的班，本次未加入
+                    items: {$ref: '#/components/schemas/Class'}
+        "400": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
 
   /classes/search:
     get:
@@ -309,9 +352,31 @@ paths:
   /classes/{class_id}:
     get:
       tags: [timetable]
+      summary: 班级详情。已被自动合并的班返回保留班（id 不同），merged_from 为请求的 id；未合并时为 null
       parameters: [{$ref: '#/components/parameters/ClassId'}]
       responses:
-        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Class'}}}}
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Class'
+                  - type: object
+                    properties:
+                      merged_from: {type: [integer, "null"]}
+        "404": {$ref: '#/components/responses/Error'}
+
+  /classes/{class_id}/join:
+    post:
+      tags: [timetable]
+      summary: 手动加入当前学期的班（搜索结果里点加入；含退班后重新加入），幂等
+      description: 已合并的班加入保留班。班不属于当前学期 → 409 class_archived。
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      responses:
+        "200": {description: 已加入, content: {application/json: {schema: {$ref: '#/components/schemas/Class'}}}}
+        "404": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
 
   /classes/{class_id}/assignments:
     get:
@@ -732,15 +797,20 @@ components:
           type: string
           examples: [need_invite_or_campus, invite_invalid, nickname_taken, bad_credentials,
                      not_member, post_banned, daily_limit, ddl_required, already_voted,
-                     self_thanks, ai_offline, too_large, forbidden, not_found]
+                     self_thanks, ai_offline, too_large, forbidden, not_found,
+                     unauthorized, token_expired, bad_refresh_token, bad_recovery_code, bad_nickname,
+                     bad_password, bad_request, rate_limited, invite_quota_exhausted, invalid_slot,
+                     no_semester, nickname_reserved, class_archived, method_not_allowed, internal]
         message: {type: string, description: 可直接展示的中文}
 
     Tokens:
       type: object
+      description: refresh 返回新的一对，旧 refresh token 立即作废
+      required: [access_token, refresh_token, expires_in]
       properties:
         access_token: {type: string}
         refresh_token: {type: string}
-        expires_in: {type: integer}
+        expires_in: {type: integer, description: access token 有效秒数（900）}
 
     Semester:
       type: object
@@ -759,7 +829,7 @@ components:
         role: {type: string, enum: [user, admin]}
         registered_via: {type: string, enum: [invite, campus, bootstrap]}
         leaderboard_anonymous: {type: boolean}
-        invites_remaining: {type: integer}
+        invites_remaining: {type: integer, description: 5 − 已生成的码数（未使用的也占）}
 
     SlotInput:
       type: object

@@ -31,13 +31,15 @@
 2. 认证：argon2id 存密码；access token（JWT，15 分钟）+ refresh token（30 天，库里存 sha256）；
    恢复码注册时生成一次（XXXX-XXXX-XXXX-XXXX），/auth/recover 重设密码并换新恢复码。
 3. 注册：邀请码或校园网 IP 满足其一。校园网判断读 CAMPUS_CIDRS（逗号分隔 CIDR，可为空），
-   取 Nginx 传来的 X-Real-IP（只信任 TRUSTED_PROXY）。校园网注册 inviter_id = NULL。
+   取 Nginx 传来的 X-Real-IP（只信任 TRUSTED_PROXY，默认 172.28.0.10/32 即 nginx 固定 IP）。校园网注册 inviter_id = NULL
+   （校园网与有效邀请码同时满足时按校园网，不消耗名额）。监听地址变量 HTTP_ADDR（默认 :8080）。
    每人邀请名额 5（含未使用的码）。首个用户可用 BOOTSTRAP_ADMIN_TOKEN 注册为管理员。
    同一 IP 注册做宽松限流（校园网 NAT 共用出口），如每 IP 每小时 30 次。
 4. /meta、/me、/me/invites、/me/notices。
 5. 课表导入 /timetable/import 的归班算法，严格按 api.yaml 描述：
    本次同名合一班 → 任一时段（教室+星期+节次重叠）命中则加入并补全时段 → 都不命中新建 →
-   命中两个班自动合并（成员、时段、作业归到较早的班，旧班 merged_into）→ 时段重叠但课名不同返回 conflicts。
+   命中两个班自动合并（成员、时段、作业归到较早的班，旧班 merged_into，class_merges 留撤销数据）→ 时段重叠但课名不同返回 conflicts。
+   截断课名只能加入唯一一个同名班，命中多个不同名的班按 conflicts 返回。退班后再导入不自动加回。
    全程一个事务，依赖 class_slots 的 EXCLUDE 约束防并发重复。
    教室名规范化（去 @、全半角、空格），课名比较忽略空格和全半角。
 6. /classes/search（pg_trgm 前缀/相似度）、/classes/{id}、/me/classes、DELETE /me/classes/{id}。
@@ -136,7 +138,8 @@
 2. Nginx：自签证书（脚本生成，输出公钥 sha256 供 App 固定）、反代 /api、内部转发 /files（X-Accel-Redirect）、
    client_max_body_size 11m、按 IP 限流、传 X-Real-IP。
 3. .env.example：列出所有变量（DATABASE_URL、JWT_SECRET、WORKER_TOKEN、CAMPUS_CIDRS、UPLOAD_DIR、
-   BOOTSTRAP_ADMIN_TOKEN、TRUSTED_PROXY 等），不含真实值。
+   BOOTSTRAP_ADMIN_TOKEN、TRUSTED_PROXY（默认 172.28.0.10/32，nginx 固定此 IP）、HTTP_ADDR、
+   SEMESTER_NAME / SEMESTER_STARTS_ON / SEMESTER_ENDS_ON（留空 = 按校历自动，不要预填固定学期）等），不含真实值。
 4. 备份：每日 03:30 pg_dump 压缩，保留 7 天；上传目录不备份（图片按学期清理）。写恢复步骤。
 5. GitHub Actions：
    - server：PR 跑 go test + golangci-lint；main 构建镜像（可推 GHCR）。

@@ -45,6 +45,7 @@ CREATE TABLE invite_codes (
   created_at  timestamptz NOT NULL DEFAULT now(),
   used_at     timestamptz
 );
+CREATE INDEX invite_codes_owner ON invite_codes (owner_id);
 
 CREATE TABLE auth_tokens (
   token_hash  text PRIMARY KEY,                -- sha256(refresh token)
@@ -53,6 +54,7 @@ CREATE TABLE auth_tokens (
   expires_at  timestamptz NOT NULL,
   revoked_at  timestamptz
 );
+CREATE INDEX auth_tokens_user ON auth_tokens (user_id);  -- 过期/已撤销的 token 由 WS2 定时任务清理
 
 -- ---------- 班级（教学班）与时段 ----------
 -- 识别规则：同一用户课表里同名课 = 一个班；课名+教室+星期+节次任一段对上 = 同一班；
@@ -90,10 +92,26 @@ CREATE TABLE class_members (
   class_id   bigint NOT NULL REFERENCES classes(id),
   user_id    bigint NOT NULL REFERENCES users(id),
   joined_at  timestamptz NOT NULL DEFAULT now(),
-  left_at    timestamptz,                      -- 「不是我的班」退出
+  left_at    timestamptz,                      -- 「不是我的班」退出；之后导入课表不会自动加回
   PRIMARY KEY (class_id, user_id)
 );
 CREATE INDEX class_members_user ON class_members (user_id) WHERE left_at IS NULL;
+
+-- 班级自动合并记录，管理员可撤销（撤销接口归 WS2）。snapshot 存搬走的行 id 和合并前状态：
+-- slot_ids / assignment_ids / points_ledger_ids / post_ban_ids、child_class_ids（原指向 from 的班）、
+-- from_members / into_members（[{user_id, joined_at, left_at}]）、into_name / into_name_truncated / into_teacher。
+CREATE TABLE class_merges (
+  id             bigserial PRIMARY KEY,
+  from_class_id  bigint NOT NULL REFERENCES classes(id),
+  into_class_id  bigint NOT NULL REFERENCES classes(id),
+  triggered_by   bigint REFERENCES users(id),   -- 导入课表触发合并的用户
+  snapshot       jsonb NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  undone_at      timestamptz,
+  undone_by      bigint REFERENCES users(id)
+);
+CREATE INDEX class_merges_into ON class_merges (into_class_id) WHERE undone_at IS NULL;
+CREATE INDEX class_merges_from ON class_merges (from_class_id);
 
 -- ---------- 作业（主体）与来源 ----------
 CREATE TABLE assignments (
@@ -199,6 +217,7 @@ CREATE TABLE notices (
   created_at  timestamptz NOT NULL DEFAULT now(),
   read_at     timestamptz
 );
+CREATE INDEX notices_user_time ON notices (user_id, created_at DESC);
 
 -- ---------- 谢谢与积分 ----------
 CREATE TABLE thanks (
