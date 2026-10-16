@@ -8,7 +8,8 @@
 #   SERVER_CERT_PIN           deploy/scripts/gen-cert.sh 输出的 sha256/...
 #   SERVER_BASE_URL           https://<服务器IP>:8443/api/v1
 #
-# 与 WS4 的约定：app/build.gradle.kts 从以下环境变量读取（本地 debug 可缺省）：
+# 与 WS4 的约定（作者裁决 issue #4 第 1 条，唯一一套名字，写入 workstreams.md）：
+# app/build.gradle.kts 从以下环境变量读取（本地 debug 可缺省）：
 #   SIGNING_STORE_FILE / SIGNING_STORE_PASSWORD / SIGNING_KEY_ALIAS / SIGNING_KEY_PASSWORD → signingConfigs.release
 #   SERVER_CERT_PIN / SERVER_BASE_URL → BuildConfig 字段
 #   VERSION_NAME（tag 去掉 v）/ VERSION_CODE（github.run_number）
@@ -34,6 +35,22 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
+      - name: check secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PIN: ${{ secrets.SERVER_CERT_PIN }}
+          BASE_URL: ${{ secrets.SERVER_BASE_URL }}
+        run: |
+          missing=""
+          for v in KEYSTORE_B64 KS_PASS KEY_ALIAS KEY_PASS PIN BASE_URL; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          [ -z "$missing" ] || { echo "::error::缺少 Secrets:$missing（见 deploy/README.md 第八节）"; exit 1; }
+          [[ "$PIN" == sha256/* ]] || { echo "::error::SERVER_CERT_PIN 应形如 sha256/..."; exit 1; }
+          [[ "$BASE_URL" == https://* ]] || { echo "::error::SERVER_BASE_URL 应以 https:// 开头"; exit 1; }
       - name: keystore
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -50,8 +67,14 @@ jobs:
         run: |
           export VERSION_NAME="${GITHUB_REF_NAME#v}"
           ./gradlew --no-daemon assembleRelease
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/release/*.apk)
+          [ "${#apks[@]}" -eq 1 ] || { echo "::error::应恰好产出 1 个 APK，实际：${apks[*]:-无}"; exit 1; }
+          case "${apks[0]}" in *unsigned*) echo "::error::产出的是未签名 APK：${apks[0]}"; exit 1;; esac
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "${apks[0]}"
           mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/dist/swufe-homework-${GITHUB_REF_NAME}-arm64-v8a.apk"
+          cp "${apks[0]}" "$GITHUB_WORKSPACE/dist/swufe-homework-${GITHUB_REF_NAME}-arm64-v8a.apk"
       - name: cleanup keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
@@ -101,7 +124,10 @@ jobs:
           path: dist
           merge-multiple: true
       - run: cd dist && sha256sum * > SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v2
+      # 持有 contents: write 的第三方 Action 固定到 commit SHA
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/*
           generate_release_notes: true
+          # 带 - 的 tag（如 v0.0.1-rc1）发成预发布，App 检查更新时应只看正式 Release
+          prerelease: ${{ contains(github.ref_name, '-') }}
