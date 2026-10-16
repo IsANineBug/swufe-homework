@@ -17,6 +17,7 @@ internal/api         HTTP 路由与处理器（WS1：账号与班级；WS2：hw_
 internal/points      积分规则：流水、24h 结算、每日 30 分上限、删除收回/恢复返还、删除门槛（WS2）
 internal/files       上传路径校验与 /files 过期签名 URL（WS2）
 internal/jobs        同进程定时任务：积分结算、合并提议过期、token 清理、图片清理（WS2）
+internal/ai          AI 任务：/ai/*（App）与 /worker/*（电脑端 worker），见 docs/ai-contract.md（WS3）
 internal/testdb      集成测试用数据库
 ```
 其他工作线（WS2/WS3）在 `internal/api` 的 `Router()` 里挂自己的路由；写接口校验成员可用 `store.IsMember`，管理员接口用 `api.RequireAdmin`。
@@ -34,6 +35,8 @@ export DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/homework?sslmode=dis
 export JWT_SECRET="$(openssl rand -hex 32)"
 export BOOTSTRAP_ADMIN_TOKEN=dev-boot
 export CAMPUS_CIDRS=127.0.0.1          # 本机当成校园网，方便调试注册
+export WORKER_TOKEN="$(openssl rand -hex 16)"   # 可选：启用 AI（worker 用同一个值，见 ../worker/README.md）
+export FILE_URL_SECRET="$(openssl rand -hex 32)" # 可选：签名 /files 链接
 go run ./cmd/server
 
 # 3. 试一下

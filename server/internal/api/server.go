@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/IsANineBug/swufe-homework/server/internal/ai"
 	"github.com/IsANineBug/swufe-homework/server/internal/auth"
 	"github.com/IsANineBug/swufe-homework/server/internal/config"
 	"github.com/IsANineBug/swufe-homework/server/internal/files"
@@ -30,18 +31,22 @@ type Server struct {
 	// WS2：文件 URL 签名、每人上传频率（每小时 60 次）
 	Files         *files.Signer
 	UploadLimiter *netx.Limiter
-	Now           func() time.Time
+	// WS3：AI 任务。作业创建 / DDL 变更 / 新增或编辑来源后由 hw_assignments.go 触发
+	AI  *ai.Service
+	Now func() time.Time
 }
 
 func New(cfg *config.Config, db *pgxpool.Pool) *Server {
+	signer := files.NewSigner(cfg.FileURLSecret, cfg.JWTSecret, cfg.FileURLTTL)
 	return &Server{
 		Cfg:           cfg,
 		DB:            db,
 		Tokens:        auth.NewIssuer(cfg.JWTSecret, cfg.AccessTTL),
 		RegLimiter:    netx.NewLimiter(cfg.RegisterPerIPHour, time.Hour),
 		FailLimiter:   netx.NewLimiter(LoginFailuresPerHour, time.Hour),
-		Files:         files.NewSigner(cfg.FileURLSecret, cfg.JWTSecret, cfg.FileURLTTL),
+		Files:         signer,
 		UploadLimiter: netx.NewLimiter(UploadsPerHour, time.Hour),
+		AI:            ai.New(cfg, db, signer), // 与 /files 共用签名器
 		Now:           time.Now,
 	}
 }
@@ -68,6 +73,14 @@ func (s *Server) Router() http.Handler {
 		r.Post("/auth/refresh", s.refresh)
 		r.Post("/auth/recover", s.recover)
 		r.Get("/meta", s.meta)
+
+		// 电脑端 worker（WORKER_TOKEN）
+		r.Group(func(r chi.Router) {
+			r.Use(s.AI.RequireWorker)
+			r.Post("/worker/heartbeat", s.AI.HandleHeartbeat)
+			r.Post("/worker/jobs/claim", s.AI.HandleClaim)
+			r.Post("/worker/jobs/{job_id}/result", s.AI.HandleResult)
+		})
 
 		// 需登录
 		r.Group(func(r chi.Router) {
@@ -118,6 +131,11 @@ func (s *Server) Router() http.Handler {
 				r.Get("/class-merges", s.adminClassMerges)
 				r.Post("/class-merges/{merge_id}/revert", s.adminRevertClassMerge)
 			})
+
+			// WS3：AI 草稿
+			r.Get("/ai/status", s.AI.HandleStatus)
+			r.Post("/ai/jobs", s.AI.HandleCreate)
+			r.Get("/ai/jobs/{job_id}", s.AI.HandleGet)
 		})
 	})
 	return r

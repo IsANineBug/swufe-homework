@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "requirements", "ddl", "ddl_source", "submit_method", "uncertain"],
+  "properties": {
+    "title": {"type": ["string", "null"], "minLength": 1, "maxLength": 30},
+    "requirements": {"type": ["string", "null"], "maxLength": 1000},
+    "ddl": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?\\+08:00$"},
+    "ddl_source": {"type": ["string", "null"], "maxLength": 100},
+    "submit_method": {"type": ["string", "null"], "maxLength": 100},
+    "uncertain": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["title", "requirements", "ddl", "ddl_source", "submit_method"]}
+    }
+  }
+}

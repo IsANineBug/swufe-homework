@@ -85,9 +85,16 @@ func run() error {
 	// WS2 定时任务：积分结算、合并提议过期、token 清理、图片清理
 	(&jobs.Runner{DB: pool, UploadDir: cfg.UploadDir}).Start(ctx)
 
+	app := api.New(cfg, pool)
+	if cfg.WorkerTokenPlaceholder {
+		slog.Warn("WORKER_TOKEN 还是 .env.example 的占位值，按未设置处理：AI 始终离线")
+	} else if cfg.WorkerToken == "" {
+		slog.Warn("WORKER_TOKEN 未设置：AI 始终离线")
+	}
+	go app.AI.Run(ctx) // WS3：AI 任务过期与清理
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.New(cfg, pool).Router(),
+		Handler:           app.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,

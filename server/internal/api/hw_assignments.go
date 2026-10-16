@@ -155,6 +155,7 @@ func (s *Server) createAssignment(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	s.aiAfterWrite(ctx, aid, true, false) // WS3：预生成提醒文案
 	v, err := s.loadAssignmentView(ctx, s.DB, uid, aid)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -396,6 +397,7 @@ func (s *Server) patchAssignment(w http.ResponseWriter, r *http.Request) {
 		title = &t
 	}
 	uid := currentUser(r).ID
+	var ddlChanged bool
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
 		a, err := loadAsgRef(ctx, tx, id, true)
 		if err != nil {
@@ -410,7 +412,7 @@ func (s *Server) patchAssignment(w http.ResponseWriter, r *http.Request) {
 		if !a.Writable {
 			return errClassArchived
 		}
-		ddlChanged := in.DDL != nil && !in.DDL.Equal(a.DDL)
+		ddlChanged = in.DDL != nil && !in.DDL.Equal(a.DDL)
 		if _, err := tx.Exec(ctx, `UPDATE assignments SET title = COALESCE($2, title), ddl = COALESCE($3, ddl),
 			ddl_uncertain = CASE WHEN $3::timestamptz IS NOT NULL THEN COALESCE($4, false) ELSE COALESCE($4, ddl_uncertain) END,
 			reminder_text = CASE WHEN $5 THEN NULL ELSE reminder_text END
@@ -429,6 +431,8 @@ func (s *Server) patchAssignment(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	// WS3：DDL 变更时上面已清空 reminder_text，这里重新生成；改标题也重新生成（文案里有标题）
+	s.aiAfterWrite(ctx, id, ddlChanged || title != nil, false)
 	v, err := s.loadAssignmentView(ctx, s.DB, uid, id)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -474,7 +478,7 @@ func (s *Server) addSource(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := currentUser(r).ID
 	now := s.Now()
-	var sid int64
+	var sid, asgID int64
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
 		a, err := resolveAsg(ctx, tx, id)
 		if err != nil {
@@ -502,12 +506,14 @@ func (s *Server) addSource(w http.ResponseWriter, r *http.Request) {
 		if err := points.AddPending(ctx, tx, uid, a.ClassID, sid, "supplement", points.Supplement, now); err != nil {
 			return err
 		}
+		asgID = a.ID
 		return recomputeConflict(ctx, tx, a.ID)
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
+	s.aiAfterWrite(ctx, asgID, false, true) // WS3：补充正文里可能写了别的截止时间
 	s.writeSource(ctx, w, r, sid, http.StatusCreated)
 }
 
@@ -578,6 +584,7 @@ func (s *Server) patchSource(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	uid := currentUser(r).ID
+	var asgID int64
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
 		src, err := loadSrcRef(ctx, tx, id, true)
 		if err != nil {
@@ -589,6 +596,7 @@ func (s *Server) patchSource(w http.ResponseWriter, r *http.Request) {
 		if src.AuthorID != uid {
 			return httpx.E(http.StatusForbidden, "forbidden", "只能编辑自己的内容")
 		}
+		asgID = src.AssignmentID
 		if !src.Writable {
 			return errClassArchived
 		}
@@ -636,6 +644,7 @@ func (s *Server) patchSource(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	s.aiAfterWrite(ctx, asgID, false, true) // WS3
 	s.writeSource(ctx, w, r, id, http.StatusOK)
 }
 
