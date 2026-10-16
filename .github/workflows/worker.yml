@@ -1,0 +1,39 @@
+name: worker
+
+on:
+  pull_request:
+    paths: ["worker/**", ".github/workflows/worker.yml"]
+  push:
+    branches: [main]
+    paths: ["worker/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: worker/go.sum
+      # 课表识别回归测试要调真实模型，CI 里自动跳过（WORKER_REGRESSION 未设置）
+      - run: go test -race -count=1 ./...
+      - name: cross build
+        run: |
+          for t in windows/amd64 darwin/arm64 darwin/amd64 linux/amd64; do
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -trimpath -o /dev/null .
+          done
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61
+          working-directory: worker

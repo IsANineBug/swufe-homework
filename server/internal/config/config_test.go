@@ -38,3 +38,21 @@ func TestLoadDefaultsAndSemester(t *testing.T) {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
+
+func TestWorkerToken(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("WORKER_TOKEN", "CHANGE_ME_LONG_RANDOM") // 照抄 .env.example：按未设置处理，不阻止启动
+	c, err := Load()
+	if err != nil || c.WorkerToken != "" || !c.WorkerTokenPlaceholder {
+		t.Fatalf("placeholder: %+v %v", c, err)
+	}
+	t.Setenv("WORKER_TOKEN", "short")
+	if _, err := Load(); err == nil {
+		t.Fatal("short WORKER_TOKEN accepted")
+	}
+	t.Setenv("WORKER_TOKEN", "0123456789abcdef01234567")
+	if c, err := Load(); err != nil || c.WorkerToken != "0123456789abcdef01234567" {
+		t.Fatalf("%v %v", c, err)
+	}
+}
