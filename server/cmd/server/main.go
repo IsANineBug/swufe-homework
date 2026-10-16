@@ -45,11 +45,21 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	// 学期按校历自动生成与切换：启动时一次，之后每小时检查
+	// 学期（issue #4 裁决 12）：设置了 SEMESTER_* 则以其为准；否则按校历自动推算与切换。
+	// 启动时一次，之后每小时检查
+	semesterSpec := func() store.SemesterSpec {
+		if cfg.SemesterName != "" {
+			a, _ := time.Parse(time.DateOnly, cfg.SemesterStartsOn)
+			b, _ := time.Parse(time.DateOnly, cfg.SemesterEndsOn)
+			return store.SemesterSpec{Name: cfg.SemesterName, StartsOn: a, EndsOn: b}
+		}
+		return store.SemesterFor(time.Now().In(httpx.Shanghai))
+	}
 	ensureSemester := func() error {
-		switched, err := store.EnsureCurrentSemester(ctx, pool, time.Now(), httpx.Shanghai)
+		spec := semesterSpec()
+		switched, err := store.EnsureCurrentSemester(ctx, pool, spec)
 		if switched {
-			slog.Info("current semester switched", "name", store.SemesterFor(time.Now().In(httpx.Shanghai)).Name)
+			slog.Info("current semester switched", "name", spec.Name)
 		}
 		return err
 	}

@@ -56,6 +56,20 @@ func NewLimiter(limit int, window time.Duration) *Limiter {
 	return &Limiter{limit: limit, window: window, hits: map[string][]time.Time{}, now: time.Now}
 }
 
+// Blocked 只检查是否已达上限，不记录。
+func (l *Limiter) Blocked(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cut := l.now().Add(-l.window)
+	n := 0
+	for _, t := range l.hits[key] {
+		if !t.Before(cut) {
+			n++
+		}
+	}
+	return n >= l.limit
+}
+
 // Allow 记录一次并返回是否未超限。
 func (l *Limiter) Allow(key string) bool {
 	l.mu.Lock()

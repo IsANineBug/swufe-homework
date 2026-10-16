@@ -89,3 +89,38 @@ func TestValidate(t *testing.T) {
 		t.Error("over max should fail")
 	}
 }
+
+// 截断前缀能匹配多个不同的完整课名时不自动归组，且结果与输入顺序无关。
+func TestGroupAmbiguousTruncatedPrefix(t *testing.T) {
+	mk := func(order []int) []*group {
+		all := []SlotInput{
+			{Name: "大学英语", Room: "A101", Weekday: 1, Start: 1, End: 2},
+			{Name: "大学物理", Room: "A102", Weekday: 2, Start: 1, End: 2},
+			{Name: "大学…", Room: "A103", Weekday: 3, Start: 1, End: 2, Truncated: true},
+			{Name: "大学…", Room: "A104", Weekday: 4, Start: 1, End: 2, Truncated: true},
+		}
+		var in []SlotInput
+		for _, i := range order {
+			in = append(in, all[i])
+		}
+		v, err := Validate(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Group(v)
+	}
+	for _, order := range [][]int{{0, 1, 2, 3}, {2, 0, 3, 1}, {3, 2, 1, 0}} {
+		gs := mk(order)
+		if len(gs) != 3 {
+			t.Fatalf("order %v: groups = %d, want 3", order, len(gs))
+		}
+		for _, g := range gs {
+			if g.truncated && (g.name != "大学" || len(g.slots) != 2) {
+				t.Fatalf("order %v: truncated group = %+v", order, g)
+			}
+			if !g.truncated && len(g.slots) != 1 {
+				t.Fatalf("order %v: full group = %+v", order, g)
+			}
+		}
+	}
+}

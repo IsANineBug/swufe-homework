@@ -300,3 +300,114 @@ func TestNoSemester(t *testing.T) {
 func itoa(i int) string { return jsonInt(i) }
 
 func jsonInt(i int) string { b, _ := json.Marshal(i); return string(b) }
+
+// 校园网 + 有效邀请码同时满足：按校园网注册，inviter_id = NULL，邀请码不消耗（issue #4 裁决 13）。
+func TestRegisterCampusWinsOverInvite(t *testing.T) {
+	e := newEnv(t, "192.0.2.0/24")
+	tok := e.do("POST", "/auth/register", "", reg("邀请人", nil)).Body["access_token"].(string)
+	code := e.do("POST", "/me/invites", tok, nil).Body["code"].(string)
+	e.mustCode(e.do("POST", "/auth/register", "", reg("校园同学", code)), 201)
+	var via string
+	var inviter *int64
+	if err := e.pool.QueryRow(context.Background(), `SELECT registered_via, inviter_id FROM users WHERE nickname = '校园同学'`).Scan(&via, &inviter); err != nil {
+		t.Fatal(err)
+	}
+	if via != "campus" || inviter != nil {
+		t.Fatalf("via=%s inviter=%v", via, inviter)
+	}
+	inv := e.do("GET", "/me/invites", tok, nil)
+	if strings.Contains(string(inv.Raw), "校园同学") {
+		t.Fatalf("invite code should stay unused: %s", inv.Raw)
+	}
+}
+
+// 保留昵称不可注册或改用，规范化后比对（issue #4 裁决 14）。
+func TestReservedNicknames(t *testing.T) {
+	e := newEnv(t, "192.0.2.0/24")
+	for _, n := range []string{"管理员", "管 理员", "Ａｄｍｉｎ", " ADMIN ", "官方", "系统"} {
+		e.errCode(e.do("POST", "/auth/register", "", reg(n, nil)), 400, "nickname_reserved")
+	}
+	tok := e.do("POST", "/auth/register", "", reg("普通人", nil)).Body["access_token"].(string)
+	e.errCode(e.do("PATCH", "/me", tok, map[string]any{"nickname": "admin"}), 400, "nickname_reserved")
+	e.mustCode(e.do("PATCH", "/me", tok, map[string]any{"nickname": "管理员小助手"}), 200)
+}
+
+// 登录限流按「昵称+IP」只计失败：别人刷错密码不影响本人从另一个 IP 登录，成功登录不计数。
+func TestLoginFailureLimitPerNicknameAndIP(t *testing.T) {
+	e := newEnv(t, "192.0.2.0/24")
+	e.mustCode(e.do("POST", "/auth/register", "", reg("小绿", nil)), 201)
+	good := map[string]string{"nickname": "小绿", "password": "password123"}
+	for i := 0; i < api.LoginFailuresPerHour+5; i++ { // 成功登录不计数
+		e.mustCode(e.do("POST", "/auth/login", "", good), 200)
+	}
+	bad := map[string]string{"nickname": "小绿", "password": "wrong-password"}
+	for i := 0; i < api.LoginFailuresPerHour; i++ {
+		e.errCode(e.do("POST", "/auth/login", "", bad, "RemoteAddr", "203.0.113.9:1"), 401, "bad_credentials")
+	}
+	e.errCode(e.do("POST", "/auth/login", "", good, "RemoteAddr", "203.0.113.9:1"), 429, "rate_limited")
+	e.mustCode(e.do("POST", "/auth/login", "", good), 200) // 本人另一个 IP 不受影响
+}
+
+// logout：refresh_token 只注销本机；all=true 注销全部；都不给 400（issue #4 裁决 5）。
+func TestLogoutThisDeviceOrAll(t *testing.T) {
+	e := newEnv(t, "192.0.2.0/24")
+	e.mustCode(e.do("POST", "/auth/register", "", reg("小蓝", nil)), 201)
+	login := func() (string, string) {
+		r := e.do("POST", "/auth/login", "", map[string]string{"nickname": "小蓝", "password": "password123"})
+		e.mustCode(r, 200)
+		return r.Body["access_token"].(string), r.Body["refresh_token"].(string)
+	}
+	a1, r1 := login()
+	_, r2 := login()
+	e.errCode(e.do("POST", "/auth/logout", a1, nil), 400, "bad_request")
+	e.mustCode(e.do("POST", "/auth/logout", a1, map[string]string{"refresh_token": r1}), 204)
+	e.errCode(e.do("POST", "/auth/refresh", "", map[string]string{"refresh_token": r1}), 401, "bad_refresh_token")
+	r := e.do("POST", "/auth/refresh", "", map[string]string{"refresh_token": r2}) // 另一台设备还在
+	e.mustCode(r, 200)
+	r3 := r.Body["refresh_token"].(string)
+	_, r4 := login()
+	e.mustCode(e.do("POST", "/auth/logout", a1, map[string]any{"all": true}), 204)
+	e.errCode(e.do("POST", "/auth/refresh", "", map[string]string{"refresh_token": r3}), 401, "bad_refresh_token")
+	e.errCode(e.do("POST", "/auth/refresh", "", map[string]string{"refresh_token": r4}), 401, "bad_refresh_token")
+}
+
+// 退班后导入不自动加回（skipped），可手动加入；已合并的班返回保留班并带 merged_from。
+func TestLeaveSkipJoinAndMergedFrom(t *testing.T) {
+	e := newEnv(t, "192.0.2.0/24")
+	tok := e.do("POST", "/auth/register", "", reg("阿丁", nil)).Body["access_token"].(string)
+	slots := map[string]any{"slots": []map[string]any{{"name": "会计学", "room": "通博楼B101", "weekday": 2, "start": 1, "end": 2}}}
+	r := e.do("POST", "/timetable/import", tok, slots)
+	cid := int(r.Body["created"].([]any)[0].(map[string]any)["id"].(float64))
+	e.mustCode(e.do("DELETE", "/me/classes/"+itoa(cid), tok, nil), 204)
+
+	r = e.do("POST", "/timetable/import", tok, slots)
+	e.mustCode(r, 200)
+	if len(r.Body["joined"].([]any)) != 0 || len(r.Body["skipped"].([]any)) != 1 {
+		t.Fatalf("reimport = %s", r.Raw)
+	}
+	j := e.do("POST", "/classes/"+itoa(cid)+"/join", tok, nil)
+	e.mustCode(j, 200)
+	if j.Body["member_count"] != float64(1) {
+		t.Fatalf("join = %s", j.Raw)
+	}
+	if mc := e.do("GET", "/me/classes", tok, nil); !strings.Contains(string(mc.Raw), "会计学") {
+		t.Fatalf("me/classes = %s", mc.Raw)
+	}
+	e.errCode(e.do("POST", "/classes/99999/join", tok, nil), 404, "not_found")
+
+	// 手工造一个已合并的班
+	var old int64
+	if err := e.pool.QueryRow(context.Background(), `INSERT INTO classes (semester_id, name, created_by, merged_into)
+		SELECT semester_id, name, created_by, id FROM classes WHERE id = $1 RETURNING id`, cid).Scan(&old); err != nil {
+		t.Fatal(err)
+	}
+	g := e.do("GET", "/classes/"+jsonInt(int(old)), tok, nil)
+	e.mustCode(g, 200)
+	if g.Body["id"] != float64(cid) || g.Body["merged_from"] != float64(old) {
+		t.Fatalf("merged class = %s", g.Raw)
+	}
+	g = e.do("GET", "/classes/"+itoa(cid), tok, nil)
+	if _, ok := g.Body["merged_from"]; !ok || g.Body["merged_from"] != nil {
+		t.Fatalf("merged_from should be null: %s", g.Raw)
+	}
+}

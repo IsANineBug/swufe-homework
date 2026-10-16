@@ -159,7 +159,7 @@ func TestImportConflictDifferentName(t *testing.T) {
 	}
 }
 
-// 「不是我的班」退出后再次导入会重新加入；重复导入幂等。
+// 重复导入幂等。
 func TestImportIdempotent(t *testing.T) {
 	pool := testdb.New(t)
 	a := testdb.User(t, pool, "a")
@@ -201,5 +201,98 @@ func TestImportConcurrent(t *testing.T) {
 	if m := count(t, pool, `SELECT count(*) FROM class_members m JOIN classes c ON c.id = m.class_id
 		WHERE c.merged_into IS NULL AND m.left_at IS NULL`); m != n {
 		t.Fatalf("members = %d", m)
+	}
+}
+
+// 阻塞项回归：截断课名的一组同时命中两个不同全名的班 → 不合并，按冲突返回，该组不入库。
+func TestImportTruncatedHitsTwoDifferentClassesNoMerge(t *testing.T) {
+	pool := testdb.New(t)
+	a := testdb.User(t, pool, "a")
+	b := testdb.User(t, pool, "b")
+	c := testdb.User(t, pool, "c")
+	eng := imp(t, pool, a, slot("大学英语", "经世楼A101", 1, 1, 2)).Created[0].ID
+	phy := imp(t, pool, b, slot("大学物理", "经世楼A102", 2, 3, 4)).Created[0].ID
+
+	tr := func(room string, wd, s, e int) timetable.SlotInput {
+		return timetable.SlotInput{Name: "大学…", Room: room, Weekday: wd, Start: s, End: e, Truncated: true}
+	}
+	r := imp(t, pool, c, tr("经世楼A101", 1, 1, 2), tr("经世楼A102", 2, 3, 4), slot("会计学", "通博楼B101", 3, 1, 2))
+	if len(r.Merged) != 0 {
+		t.Fatalf("must not merge: %+v", r.Merged)
+	}
+	if len(r.Conflicts) != 2 {
+		t.Fatalf("conflicts = %+v", r.Conflicts)
+	}
+	got := map[int64]bool{}
+	for _, cf := range r.Conflicts {
+		got[cf.ExistingClass.ID] = true
+	}
+	if !got[eng] || !got[phy] {
+		t.Fatalf("conflicts should name both classes: %+v", r.Conflicts)
+	}
+	if len(r.Created) != 1 || r.Created[0].Name != "会计学" || len(r.Joined) != 0 {
+		t.Fatalf("r = %+v", r)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM classes WHERE merged_into IS NOT NULL`); n != 0 {
+		t.Fatal("no class should be merged")
+	}
+	if n := count(t, pool, `SELECT count(*) FROM class_members WHERE user_id = $1 AND class_id IN ($2, $3)`, c, eng, phy); n != 0 {
+		t.Fatal("ambiguous group should not join any class")
+	}
+}
+
+// 截断课名只命中唯一一个同名班 → 照常加入。
+func TestImportTruncatedJoinsSingleClass(t *testing.T) {
+	pool := testdb.New(t)
+	a := testdb.User(t, pool, "a")
+	b := testdb.User(t, pool, "b")
+	eng := imp(t, pool, a, slot("大学英语", "经世楼A101", 1, 1, 2)).Created[0].ID
+	r := imp(t, pool, b, timetable.SlotInput{Name: "大学…", Room: "经世楼A101", Weekday: 1, Start: 1, End: 2, Truncated: true})
+	if len(r.Joined) != 1 || r.Joined[0].ID != eng || len(r.Conflicts) != 0 {
+		t.Fatalf("r = %+v", r)
+	}
+}
+
+// 「不是我的班」退出后，再次导入不自动加回（issue #4 裁决 11），返回在 skipped 里。
+func TestImportDoesNotRejoinLeftClass(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a")
+	cid := imp(t, pool, a, slot(prob, "经世楼G101", 1, 1, 2)).Created[0].ID
+	if _, err := pool.Exec(ctx, `UPDATE class_members SET left_at = now() WHERE class_id = $1 AND user_id = $2`, cid, a); err != nil {
+		t.Fatal(err)
+	}
+	r := imp(t, pool, a, slot(prob, "经世楼G101", 1, 1, 2))
+	if len(r.Joined) != 0 || len(r.Skipped) != 1 || r.Skipped[0].ID != cid {
+		t.Fatalf("r = %+v", r)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM class_members WHERE class_id = $1 AND user_id = $2 AND left_at IS NULL`, cid, a); n != 0 {
+		t.Fatal("should stay left")
+	}
+}
+
+// 自动合并在 class_merges 留下撤销数据。
+func TestImportMergeRecordsUndoSnapshot(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a")
+	b := testdb.User(t, pool, "b")
+	c := testdb.User(t, pool, "c")
+	older := imp(t, pool, a, slot("微观经济学", "通博楼B203", 3, 1, 2)).Created[0].ID
+	newer := imp(t, pool, b, slot("微观经济学", "通博楼B204", 4, 3, 4)).Created[0].ID
+	imp(t, pool, c, slot("微观经济学", "通博楼B203", 3, 1, 2), slot("微观经济学", "通博楼B204", 4, 3, 4))
+
+	var from, into, by int64
+	var slots, members, intoMembers int
+	var intoName string
+	err := pool.QueryRow(ctx, `SELECT from_class_id, into_class_id, triggered_by,
+		jsonb_array_length(snapshot->'slot_ids'), jsonb_array_length(snapshot->'from_members'),
+		jsonb_array_length(snapshot->'into_members'), snapshot->>'into_name'
+		FROM class_merges`).Scan(&from, &into, &by, &slots, &members, &intoMembers, &intoName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if from != newer || into != older || by != c || slots != 1 || members != 1 || intoMembers != 1 || intoName != "微观经济学" {
+		t.Fatalf("snapshot from=%d into=%d by=%d slots=%d members=%d into_members=%d name=%s", from, into, by, slots, members, intoMembers, intoName)
 	}
 }

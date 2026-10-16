@@ -41,6 +41,8 @@ type Result struct {
 	Created   []store.Class `json:"created"`
 	Merged    []Merged      `json:"merged"`
 	Conflicts []Conflict    `json:"conflicts"`
+	// Skipped 之前点过「不是我的班」的班：本次不自动加回（issue #4 裁决 11），可在搜索里手动加入
+	Skipped []store.Class `json:"skipped"`
 }
 
 // ValidationError 输入不合法。
@@ -96,23 +98,54 @@ type group struct {
 	slots     []SlotInput
 }
 
-// Group 按课名分组；课名比较忽略空格、全半角，截断的前缀并入完整课名。
+// Group 按课名分组（规则 1），结果与输入顺序无关。
+//   - 完整课名按 NameKey 分组；
+//   - 截断课名：与某完整课名 NameKey 相同，或恰好是唯一一个完整课名的前缀 → 并入该组；
+//     能匹配多个不同的完整课名时有歧义，不自动归组，按截断名单独成组（issue #4 裁决 10）；
+//   - 其余截断课名按 NameKey 相同归组。
 func Group(slots []SlotInput) []*group {
 	var groups []*group
+	full := map[string]*group{}
+	var fullKeys []string
 	for _, s := range slots {
-		var g *group
-		for _, cand := range groups {
-			if SameName(cand.name, cand.truncated, s.Name, s.Truncated) {
-				g = cand
-				break
+		if s.Truncated {
+			continue
+		}
+		k := NameKey(s.Name)
+		if full[k] == nil {
+			full[k] = &group{name: s.Name}
+			fullKeys = append(fullKeys, k)
+			groups = append(groups, full[k])
+		}
+	}
+	trunc := map[string]*group{}
+	pick := func(s SlotInput) *group {
+		if !s.Truncated {
+			return full[NameKey(s.Name)]
+		}
+		k := NameKey(s.Name)
+		if g := full[k]; g != nil {
+			return g
+		}
+		var match *group
+		n := 0
+		for _, fk := range fullKeys {
+			if SameName(s.Name, true, full[fk].name, false) {
+				match = full[fk]
+				n++
 			}
 		}
-		if g == nil {
-			g = &group{name: s.Name, truncated: s.Truncated}
-			groups = append(groups, g)
-		} else if g.truncated && !s.Truncated {
-			g.name, g.truncated = s.Name, false
+		if n == 1 {
+			return match
 		}
+		if trunc[k] == nil {
+			trunc[k] = &group{name: s.Name, truncated: true}
+			groups = append(groups, trunc[k])
+		}
+		return trunc[k]
+	}
+	for _, s := range slots {
+		g := pick(s)
 		if g.teacher == nil && s.Teacher != nil {
 			g.teacher = s.Teacher
 		}
@@ -131,6 +164,33 @@ func Group(slots []SlotInput) []*group {
 		})
 	}
 	return groups
+}
+
+// ambiguousHits 命中多个班时，判断能否安全地自动合并（issue #4 裁决 10）：
+//   - 本组课名是截断的：只能用于加入唯一一个同名班，命中的班课名（NameKey）必须完全相同；
+//   - 本组课名完整：命中的班必须两两同名。
+//
+// 不满足即有歧义，按 conflicts 返回，不合并、不入库。
+func ambiguousHits(g *group, hits map[int64]existing) bool {
+	if len(hits) < 2 {
+		return false
+	}
+	hs := make([]existing, 0, len(hits))
+	for _, e := range hits {
+		hs = append(hs, e)
+	}
+	for i := range hs {
+		for j := i + 1; j < len(hs); j++ {
+			if g.truncated {
+				if NameKey(hs[i].name) != NameKey(hs[j].name) {
+					return true
+				}
+			} else if !SameName(hs[i].name, hs[i].truncated, hs[j].name, hs[j].truncated) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type existing struct {
@@ -192,6 +252,7 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 
 	var joinedIDs, createdIDs []int64
 	res := &Result{Merged: []Merged{}, Conflicts: []Conflict{}}
+	var skippedIDs []int64
 	type pendingConflict struct {
 		slot    SlotInput
 		classID int64
@@ -200,7 +261,7 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 
 	for _, g := range Group(slots) {
 		hits := map[int64]existing{}
-		var gConf []pendingConflict
+		var gConf, gHits []pendingConflict
 		for _, s := range g.slots {
 			ov, err := overlapping(ctx, tx, sem.ID, s)
 			if err != nil {
@@ -209,6 +270,7 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 			for _, e := range ov {
 				if SameName(g.name, g.truncated, e.name, e.truncated) {
 					hits[e.classID] = e
+					gHits = append(gHits, pendingConflict{s, e.classID})
 				} else {
 					gConf = append(gConf, pendingConflict{s, e.classID})
 				}
@@ -216,6 +278,10 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 		}
 		if len(gConf) > 0 { // 时段重叠但课名不同：该组不入库
 			pcs = append(pcs, gConf...)
+			continue
+		}
+		if ambiguousHits(g, hits) { // 截断课名命中多个不同名的班：不自动合并，该组不入库
+			pcs = append(pcs, gHits...)
 			continue
 		}
 
@@ -234,7 +300,7 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 				ids = append(ids, id)
 			}
 			// 规则 2/4：命中一个直接加入；命中多个则并到最早创建的班
-			target, err = mergeClasses(ctx, tx, ids, res)
+			target, err = mergeClasses(ctx, tx, ids, userID, res)
 			if err != nil {
 				return nil, err
 			}
@@ -273,14 +339,23 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 				return nil, err
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO class_members (class_id, user_id) VALUES ($1, $2)
-			ON CONFLICT (class_id, user_id) DO UPDATE SET left_at = NULL`, target, userID); err != nil {
+		// 加入。之前点过「不是我的班」（left_at 非空）的不自动加回
+		var left bool
+		err = tx.QueryRow(ctx, `WITH ins AS (
+				INSERT INTO class_members (class_id, user_id) VALUES ($1, $2)
+				ON CONFLICT (class_id, user_id) DO NOTHING RETURNING 1)
+			SELECT EXISTS (SELECT 1 FROM class_members WHERE class_id = $1 AND user_id = $2 AND left_at IS NOT NULL)`,
+			target, userID).Scan(&left)
+		if err != nil {
 			return nil, err
+		}
+		if left {
+			skippedIDs = append(skippedIDs, target)
 		}
 	}
 
 	// 装载返回值。冲突里的班级可能在本次后续步骤中被合并，按最终班级装载。
-	all := append(append([]int64{}, joinedIDs...), createdIDs...)
+	all := append(append(append([]int64{}, joinedIDs...), createdIDs...), skippedIDs...)
 	for i := range pcs {
 		id, err := store.ResolveClass(ctx, tx, pcs[i].classID)
 		if err != nil {
@@ -312,7 +387,21 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 			joinedIDs[i] = r
 		}
 	}
-	res.Joined = pick(joinedIDs)
+	skipped := map[int64]bool{}
+	for i, id := range skippedIDs {
+		if r, err := store.ResolveClass(ctx, tx, id); err == nil {
+			skippedIDs[i] = r
+		}
+		skipped[skippedIDs[i]] = true
+	}
+	var joinedKeep []int64
+	for _, id := range joinedIDs {
+		if !skipped[id] {
+			joinedKeep = append(joinedKeep, id)
+		}
+	}
+	res.Joined = pick(joinedKeep)
+	res.Skipped = pick(skippedIDs)
 	res.Created = pick(createdIDs)
 	for _, pc := range pcs {
 		res.Conflicts = append(res.Conflicts, Conflict{Slot: pc.slot, ExistingClass: byID[pc.classID]})
@@ -348,7 +437,8 @@ func overlapping(ctx context.Context, tx pgx.Tx, semID int32, s SlotInput) ([]ex
 
 // mergeClasses 把 ids 中的班并到最早创建的那个（成员、时段、作业、积分流水、禁发记录），
 // 旧班 merged_into 指向保留班。只有一个 id 时直接返回。
-func mergeClasses(ctx context.Context, tx pgx.Tx, ids []int64, res *Result) (int64, error) {
+// 每次合并先在 class_merges 记下搬动的行和合并前状态，供管理员撤销（issue #4 裁决 10）。
+func mergeClasses(ctx context.Context, tx pgx.Tx, ids []int64, userID int64, res *Result) (int64, error) {
 	rows, err := tx.Query(ctx, `SELECT id, name, name_truncated FROM classes WHERE id = ANY($1)
 		ORDER BY created_at, id FOR UPDATE`, ids)
 	if err != nil {
@@ -377,6 +467,9 @@ func mergeClasses(ctx context.Context, tx pgx.Tx, ids []int64, res *Result) (int
 	}
 	keep := cs[0]
 	for _, from := range cs[1:] {
+		if _, err := tx.Exec(ctx, mergeSnapshotSQL, from.id, keep.id, userID); err != nil {
+			return 0, fmt.Errorf("merge snapshot %d into %d: %w", from.id, keep.id, err)
+		}
 		stmts := []string{
 			`UPDATE class_slots SET class_id = $2 WHERE class_id = $1`,
 			// 成员：任一班在班即在班
@@ -424,3 +517,18 @@ func uniq(ids []int64) []int64 {
 	}
 	return out
 }
+
+// mergeSnapshotSQL 记录一次班级合并的撤销数据；字段说明见 db/schema.sql 的 class_merges。
+const mergeSnapshotSQL = `INSERT INTO class_merges (from_class_id, into_class_id, triggered_by, snapshot)
+SELECT $1, $2, $3, jsonb_build_object(
+  'slot_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM class_slots WHERE class_id = $1), '[]'),
+  'assignment_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM assignments WHERE class_id = $1), '[]'),
+  'points_ledger_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM points_ledger WHERE class_id = $1), '[]'),
+  'post_ban_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM post_bans WHERE class_id = $1), '[]'),
+  'child_class_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM classes WHERE merged_into = $1), '[]'),
+  'from_members', coalesce((SELECT jsonb_agg(jsonb_build_object('user_id', user_id, 'joined_at', joined_at, 'left_at', left_at)
+                   ORDER BY user_id) FROM class_members WHERE class_id = $1), '[]'),
+  'into_members', coalesce((SELECT jsonb_agg(jsonb_build_object('user_id', user_id, 'joined_at', joined_at, 'left_at', left_at)
+                   ORDER BY user_id) FROM class_members WHERE class_id = $2), '[]'),
+  'into_name', c.name, 'into_name_truncated', c.name_truncated, 'into_teacher', c.teacher)
+FROM classes c WHERE c.id = $2`

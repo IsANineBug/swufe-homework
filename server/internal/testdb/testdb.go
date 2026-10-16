@@ -33,7 +33,7 @@ func New(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	_, err = pool.Exec(ctx, `TRUNCATE ai_jobs, ai_workers, announcements, points_ledger, thanks, notices,
+	_, err = pool.Exec(ctx, `TRUNCATE class_merges, ai_jobs, ai_workers, announcements, points_ledger, thanks, notices,
 		post_bans, delete_votes, merge_votes, merge_proposals, completions, attachments,
 		assignment_sources, assignments, class_members, class_slots, classes, auth_tokens,
 		invite_codes, users, semesters RESTART IDENTITY CASCADE`)

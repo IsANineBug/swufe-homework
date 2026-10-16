@@ -8,7 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// SemesterSpec 按日期推出的学期。
+// SemesterSpec 一个学期的名称与起止日期。
+// 来源（issue #4 裁决 12）：设置了 SEMESTER_* 环境变量时以其为准；否则按校历推算（SemesterFor）。
 // 校历（需求定稿 §四）：秋季学期 9 月 1 日开始、次年 2 月 1 日截止；春季学期 3 月 1 日开始、8 月 1 日截止。
 // 2 月、8 月的假期归入即将开始的学期，便于开学前导入课表。
 type SemesterSpec struct {
@@ -32,10 +33,9 @@ func SemesterFor(day time.Time) SemesterSpec {
 	}
 }
 
-// EnsureCurrentSemester 保证 now 所属学期存在且为当前学期；切换时把旧的当前学期归档（只读）。
+// EnsureCurrentSemester 保证 spec 学期存在且为当前学期；切换时把旧的当前学期归档（只读）。
 // 启动时和每小时调用一次，幂等。返回是否发生了切换。
-func EnsureCurrentSemester(ctx context.Context, pool *pgxpool.Pool, now time.Time, loc *time.Location) (bool, error) {
-	spec := SemesterFor(now.In(loc))
+func EnsureCurrentSemester(ctx context.Context, pool *pgxpool.Pool, spec SemesterSpec) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, err

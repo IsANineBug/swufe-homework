@@ -24,13 +24,22 @@ const (
 	argonSaltLen = 16
 )
 
+// argonSlots 限制 argon2 并发：每次约占 19MiB，server 容器限 512MB，最多同时算 4 个，其余排队。
+var argonSlots = make(chan struct{}, 4)
+
+func argonKey(pw, salt []byte, t, m uint32, p uint8, n uint32) []byte {
+	argonSlots <- struct{}{}
+	defer func() { <-argonSlots }()
+	return argon2.IDKey(pw, salt, t, m, p, n)
+}
+
 // HashPassword 返回 PHC 格式：$argon2id$v=19$m=..,t=..,p=..$salt$hash
 func HashPassword(pw string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key := argonKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, argonMemory, argonTime, argonThreads,
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
@@ -61,7 +70,7 @@ func VerifyPassword(pw, encoded string) (bool, error) {
 	if err != nil {
 		return false, errBadHash
 	}
-	got := argon2.IDKey([]byte(pw), salt, t, m, p, uint32(len(want)))
+	got := argonKey([]byte(pw), salt, t, m, p, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 

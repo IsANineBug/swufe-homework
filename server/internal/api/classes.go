@@ -99,15 +99,15 @@ func (s *Server) leaveClass(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// getClass 已被自动合并的班返回保留的那个班（id 会变）。
+// getClass 已被自动合并的班返回保留的那个班（id 会变），merged_from 为请求的 id（issue #4 裁决 9）。
 func (s *Server) getClass(w http.ResponseWriter, r *http.Request) {
-	id, err := classIDParam(r)
+	req, err := classIDParam(r)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	ctx := r.Context()
-	id, err = store.ResolveClass(ctx, s.DB, id)
+	id, err := store.ResolveClass(ctx, s.DB, req)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Fail(w, r, httpx.ErrNotFound)
 		return
@@ -123,6 +123,53 @@ func (s *Server) getClass(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(cs) == 0 {
 		httpx.Fail(w, r, httpx.ErrNotFound)
+		return
+	}
+	out := classWithMerge{Class: cs[0]}
+	if id != req {
+		out.MergedFrom = &req
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+type classWithMerge struct {
+	store.Class
+	MergedFrom *int64 `json:"merged_from"`
+}
+
+// joinClass 手动加入当前学期的班（含点过「不是我的班」后重新加入），幂等。
+// 已合并的班加入保留班；返回加入后的班级。
+func (s *Server) joinClass(w http.ResponseWriter, r *http.Request) {
+	id, err := classIDParam(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	ctx := r.Context()
+	id, err = store.ResolveClass(ctx, s.DB, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Fail(w, r, httpx.ErrNotFound)
+		return
+	}
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	tag, err := s.DB.Exec(ctx, `INSERT INTO class_members (class_id, user_id)
+		SELECT c.id, $2 FROM classes c JOIN semesters se ON se.id = c.semester_id AND se.is_current AND NOT se.archived
+		WHERE c.id = $1
+		ON CONFLICT (class_id, user_id) DO UPDATE SET left_at = NULL`, id, currentUser(r).ID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Fail(w, r, httpx.E(http.StatusConflict, "class_archived", "该班不属于当前学期，无法加入"))
+		return
+	}
+	cs, err := store.LoadClasses(ctx, s.DB, []int64{id})
+	if err != nil {
+		httpx.Fail(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, cs[0])

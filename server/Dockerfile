@@ -13,7 +13,8 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app
 COPY --from=build /out/server /usr/local/bin/server
 USER app
-ENV ADDR=:8080 TZ=Asia/Shanghai
+ENV HTTP_ADDR=:8080 TZ=Asia/Shanghai
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+# 端口取自 HTTP_ADDR（形如 :8080 或 0.0.0.0:8080）
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- "http://127.0.0.1:${HTTP_ADDR##*:}/healthz" || exit 1
 ENTRYPOINT ["/usr/local/bin/server"]

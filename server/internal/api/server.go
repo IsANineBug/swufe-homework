@@ -24,16 +24,19 @@ type Server struct {
 	DB         *pgxpool.Pool
 	Tokens     *auth.Issuer
 	RegLimiter *netx.Limiter
-	Now        func() time.Time
+	// FailLimiter 登录 / 恢复码失败次数，按「昵称+IP」计，只记失败
+	FailLimiter *netx.Limiter
+	Now         func() time.Time
 }
 
 func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	return &Server{
-		Cfg:        cfg,
-		DB:         db,
-		Tokens:     auth.NewIssuer(cfg.JWTSecret, cfg.AccessTTL),
-		RegLimiter: netx.NewLimiter(cfg.RegisterPerIPHour, time.Hour),
-		Now:        time.Now,
+		Cfg:         cfg,
+		DB:          db,
+		Tokens:      auth.NewIssuer(cfg.JWTSecret, cfg.AccessTTL),
+		RegLimiter:  netx.NewLimiter(cfg.RegisterPerIPHour, time.Hour),
+		FailLimiter: netx.NewLimiter(LoginFailuresPerHour, time.Hour),
+		Now:         time.Now,
 	}
 }
 
@@ -70,6 +73,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/timetable/import", s.importTimetable)
 			r.Get("/classes/search", s.searchClasses)
 			r.Get("/classes/{class_id}", s.getClass)
+			r.Post("/classes/{class_id}/join", s.joinClass)
 		})
 	})
 	return r

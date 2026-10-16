@@ -20,11 +20,18 @@ type Config struct {
 	AccessTTL           time.Duration
 	RefreshTTL          time.Duration
 	LogLevel            string
+	// 可选：给定则启动时确保该学期存在并设为当前学期；不给则按校历自动推算（store.SemesterFor）
+	SemesterName     string
+	SemesterStartsOn string
+	SemesterEndsOn   string
 }
+
+// DefaultTrustedProxy 只信任 docker 网络里固定 IP 的 nginx（与 WS6 docker-compose 约定）。
+const DefaultTrustedProxy = "172.28.0.10/32"
 
 func Load() (*Config, error) {
 	c := &Config{
-		Addr:                getenv("ADDR", ":8080"),
+		Addr:                getenv("HTTP_ADDR", ":8080"),
 		DatabaseURL:         os.Getenv("DATABASE_URL"),
 		JWTSecret:           []byte(os.Getenv("JWT_SECRET")),
 		BootstrapAdminToken: os.Getenv("BOOTSTRAP_ADMIN_TOKEN"),
@@ -32,6 +39,9 @@ func Load() (*Config, error) {
 		AccessTTL:           15 * time.Minute,
 		RefreshTTL:          30 * 24 * time.Hour,
 		LogLevel:            getenv("LOG_LEVEL", "info"),
+		SemesterName:        os.Getenv("SEMESTER_NAME"),
+		SemesterStartsOn:    os.Getenv("SEMESTER_STARTS_ON"),
+		SemesterEndsOn:      os.Getenv("SEMESTER_ENDS_ON"),
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL 未设置")
@@ -43,12 +53,22 @@ func Load() (*Config, error) {
 	if c.CampusCIDRs, err = ParseCIDRs(os.Getenv("CAMPUS_CIDRS")); err != nil {
 		return nil, fmt.Errorf("CAMPUS_CIDRS: %w", err)
 	}
-	if c.TrustedProxies, err = ParseCIDRs(os.Getenv("TRUSTED_PROXY")); err != nil {
+	if c.TrustedProxies, err = ParseCIDRs(getenv("TRUSTED_PROXY", DefaultTrustedProxy)); err != nil {
 		return nil, fmt.Errorf("TRUSTED_PROXY: %w", err)
 	}
 	if v := os.Getenv("REGISTER_PER_IP_HOUR"); v != "" {
 		if _, err := fmt.Sscanf(v, "%d", &c.RegisterPerIPHour); err != nil {
 			return nil, fmt.Errorf("REGISTER_PER_IP_HOUR: %w", err)
+		}
+	}
+	if c.SemesterName != "" || c.SemesterStartsOn != "" || c.SemesterEndsOn != "" {
+		if c.SemesterName == "" || c.SemesterStartsOn == "" || c.SemesterEndsOn == "" {
+			return nil, fmt.Errorf("SEMESTER_NAME / SEMESTER_STARTS_ON / SEMESTER_ENDS_ON 须同时设置")
+		}
+		a, err1 := time.Parse(time.DateOnly, c.SemesterStartsOn)
+		b, err2 := time.Parse(time.DateOnly, c.SemesterEndsOn)
+		if err1 != nil || err2 != nil || !a.Before(b) {
+			return nil, fmt.Errorf("SEMESTER_STARTS_ON / SEMESTER_ENDS_ON 须为 YYYY-MM-DD 且开始早于结束")
 		}
 	}
 	return c, nil

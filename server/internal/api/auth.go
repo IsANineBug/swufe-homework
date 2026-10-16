@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -60,12 +59,31 @@ func (s *Server) campusCheck(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]bool{"campus": s.isCampus(r)})
 }
 
+// LoginFailuresPerHour 同一「昵称+IP」每小时允许的登录 / 恢复码失败次数。
+const LoginFailuresPerHour = 10
+
+// reservedNicknames 不可注册或改用的昵称（issue #4 裁决 14），按 NameKey 规范化后比对
+// （忽略大小写、全半角、空格）。
+var reservedNicknames = map[string]bool{
+	"管理员": true, "admin": true, "administrator": true, "官方": true, "系统": true,
+	"system": true, "root": true, "超级管理员": true,
+}
+
+func IsReservedNickname(n string) bool { return reservedNicknames[timetable.NameKey(n)] }
+
 func cleanNickname(n string) (string, error) {
 	n = timetable.CleanName(n)
 	if l := utf8.RuneCountInString(n); l < 1 || l > 20 {
 		return "", httpx.E(http.StatusBadRequest, "bad_nickname", "昵称须为 1–20 个字")
 	}
+	if IsReservedNickname(n) {
+		return "", httpx.E(http.StatusBadRequest, "nickname_reserved", "该昵称为保留昵称，请换一个")
+	}
 	return n, nil
+}
+
+func failKey(kind, nick string, r *http.Request) string {
+	return kind + ":" + timetable.NameKey(nick) + "|" + clientIP(r)
 }
 
 func checkPassword(pw string) error {
@@ -152,6 +170,11 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			via, role = "bootstrap", "admin"
 		}
 	}
+	if via == "" && campus {
+		// 校园网优先（issue #4 裁决 13）：即使带了有效邀请码，也按校园网注册，
+		// inviter_id = NULL，邀请码不消耗
+		via = "campus"
+	}
 	if via == "" && code != "" {
 		var owner int64
 		err := tx.QueryRow(ctx, `SELECT ic.owner_id FROM invite_codes ic JOIN users u ON u.id = ic.owner_id
@@ -164,9 +187,6 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, err)
 			return
 		}
-	}
-	if via == "" && campus {
-		via = "campus" // 校园网注册：邀请树的根，inviter_id = NULL
 	}
 	if via == "" {
 		if code != "" {
@@ -222,7 +242,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nick := timetable.CleanName(in.Nickname)
-	if !s.RegLimiter.Allow("login:" + strings.ToLower(nick)) {
+	key := failKey("login", nick, r)
+	if s.FailLimiter.Blocked(key) {
 		httpx.Fail(w, r, errRateLimited)
 		return
 	}
@@ -233,6 +254,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Scan(&uid, &hash, &role, &disabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, _ = auth.VerifyPassword(in.Password, dummyHash)
+		s.FailLimiter.Allow(key)
 		httpx.Fail(w, r, errBadCredentials)
 		return
 	}
@@ -242,6 +264,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	ok, err := auth.VerifyPassword(in.Password, hash)
 	if err != nil || !ok || disabled != nil {
+		s.FailLimiter.Allow(key)
 		httpx.Fail(w, r, errBadCredentials)
 		return
 	}
@@ -312,7 +335,8 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nick := timetable.CleanName(in.Nickname)
-	if !s.RegLimiter.Allow("recover:" + strings.ToLower(nick)) {
+	key := failKey("recover", nick, r)
+	if s.FailLimiter.Blocked(key) {
 		httpx.Fail(w, r, errRateLimited)
 		return
 	}
@@ -323,6 +347,7 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 		Scan(&uid, &recHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, _ = auth.VerifyPassword("x", dummyHash)
+		s.FailLimiter.Allow(key)
 		httpx.Fail(w, r, errBadRecovery)
 		return
 	}
@@ -331,6 +356,7 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok, err := auth.VerifyPassword(auth.NormalizeRecoveryCode(in.RecoveryCode), recHash); err != nil || !ok {
+		s.FailLimiter.Allow(key)
 		httpx.Fail(w, r, errBadRecovery)
 		return
 	}
@@ -373,21 +399,29 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"new_recovery_code": newCode})
 }
 
-// logout 请求体可带 {refresh_token} 注销这一个；不带则注销本人全部 refresh token。
+// logout（issue #4 裁决 5）：带 refresh_token 只注销本机这一个；all=true 注销本人全部设备。
+// 两者都不给返回 400 bad_request。
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	var in struct {
 		RefreshToken string `json:"refresh_token"`
+		All          bool   `json:"all"`
 	}
 	if r.ContentLength != 0 {
-		_ = httpx.Decode(r, &in)
+		if err := httpx.Decode(r, &in); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
 	}
 	var err error
-	if in.RefreshToken != "" {
+	switch {
+	case in.All:
+		_, err = s.DB.Exec(r.Context(), `UPDATE auth_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, u.ID)
+	case in.RefreshToken != "":
 		_, err = s.DB.Exec(r.Context(), `UPDATE auth_tokens SET revoked_at = now()
 			WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL`, auth.HashToken(in.RefreshToken), u.ID)
-	} else {
-		_, err = s.DB.Exec(r.Context(), `UPDATE auth_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, u.ID)
+	default:
+		err = httpx.E(http.StatusBadRequest, "bad_request", "请提供 refresh_token，或 all=true 注销全部设备")
 	}
 	if err != nil {
 		httpx.Fail(w, r, err)
