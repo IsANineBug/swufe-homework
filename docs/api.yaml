@@ -734,6 +734,7 @@ paths:
     get:
       tags: [ai]
       summary: 电脑 worker 是否在线（离线时 App 置灰 AI 按钮）
+      description: 任一 worker 最近一次心跳在 60 秒内即在线。
       responses:
         "200":
           description: ok
@@ -749,6 +750,16 @@ paths:
     post:
       tags: [ai]
       summary: 发起 AI 任务；离线直接 409，不排队
+      description: |
+        各 kind 的 input 见 docs/ai-contract.md「App 传」：
+        - parse_assignment：class_id 必填；{text?, attachment_ids?[≤6]}，至少一项
+        - parse_timetable：{attachment_ids[1..2]}
+        - dedupe_review：class_id 必填；{draft:{title, body, ddl?}, candidate_ids[1..3]}
+        - spam_check：class_id 可选；{title, body, attachment_ids?[≤6]}
+        图片只能传本人上传、未清理的 image 附件 id（issue #4 裁决 6），服务器签名后交给 worker；
+        input 里出现未列出的字段（如 image_urls、context）返回 400 bad_input。
+        ddl_conflict、reminder_text 只由服务器发起。class_id 指向已合并的班时按保留班处理。
+        400 bad_input / bad_attachment；403 not_member；409 ai_offline；429 ai_busy（进行中 ≥ 3）/ ai_rate_limited（每小时 60）。
       requestBody:
         required: true
         content:
@@ -762,32 +773,45 @@ paths:
                 input: {type: object, description: 见 docs/ai-contract.md}
       responses:
         "202": {description: 已接收, content: {application/json: {schema: {$ref: '#/components/schemas/AiJob'}}}}
+        "400": {$ref: '#/components/responses/Error'}
+        "403": {$ref: '#/components/responses/Error'}
         "409": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
 
   /ai/jobs/{job_id}:
     get:
       tags: [ai]
       summary: 轮询结果（建议每 1.5 秒，最多 2 分钟）
+      description: 只能查自己发起的任务，别人的返回 404。不返回 input。任务结束 24 小时后删除（404）。
       parameters:
         - {name: job_id, in: path, required: true, schema: {type: integer}}
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AiJob'}}}}
+        "404": {$ref: '#/components/responses/Error'}
 
   /worker/heartbeat:
     post:
       tags: [worker]
       security: [{worker: []}]
+      summary: 每 20 秒一次；超过 60 秒没有心跳视为离线
+      parameters:
+        - {$ref: '#/components/parameters/WorkerId'}
       requestBody:
         content:
           application/json:
-            schema: {type: object, properties: {worker_id: {type: string}, model: {type: string}}}
-      responses: {"204": {description: ok}}
+            schema: {type: object, properties: {worker_id: {type: string, maxLength: 64}, model: {type: string, maxLength: 100}}}
+      responses:
+        "204": {description: ok}
+        "401": {$ref: '#/components/responses/Error'}
 
   /worker/jobs/claim:
     post:
       tags: [worker]
       security: [{worker: []}]
       summary: 长轮询领取任务（最长挂起 25 秒，无任务返回 204）
+      description: 领取即标 running；返回的 input 已含服务器拼好的 context 和签名后的 image_urls（站内相对链接 /files/...）。
+      parameters:
+        - {$ref: '#/components/parameters/WorkerId'}
       responses:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AiJob'}}}}
         "204": {description: 暂无任务}
@@ -806,9 +830,12 @@ paths:
               type: object
               properties:
                 status: {type: string, enum: [done, failed]}
-                output: {type: [object, "null"]}
-                error: {type: [string, "null"]}
-      responses: {"204": {description: ok}}
+                output: {type: [object, "null"], description: done 时必填，≤ 64KB}
+                error: {type: [string, "null"], description: failed 时的简短原因（≤ 300 字），不含作业正文}
+      responses:
+        "204": {description: ok}
+        "400": {description: bad_output（不是 JSON 对象、过大，或 reminder_text 等写回输出不合格，此时任务记为 failed）, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        "409": {description: job_not_running（已过期、已回传或未领取）, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
 
   /admin/sources/{source_id}/restore:
     post:
@@ -916,6 +943,7 @@ components:
     AssignmentId: {name: assignment_id, in: path, required: true, schema: {type: integer}}
     SourceId: {name: source_id, in: path, required: true, schema: {type: integer}}
     ProposalId: {name: proposal_id, in: path, required: true, schema: {type: integer}}
+    WorkerId: {name: X-Worker-Id, in: header, required: false, schema: {type: string, maxLength: 64}, description: worker 标识（排查用）}
 
   responses:
     Error:
@@ -933,7 +961,8 @@ components:
           type: string
           examples: [need_invite_or_campus, invite_invalid, nickname_taken, bad_credentials,
                      not_member, post_banned, daily_limit, ddl_required, already_voted,
-                     self_thanks, ai_offline, too_large, forbidden, not_found,
+                     self_thanks, ai_offline, ai_busy, ai_rate_limited, bad_input, bad_attachment, bad_output,
+                     job_not_running, too_large, forbidden, not_found,
                      unauthorized, token_expired, bad_refresh_token, bad_recovery_code, bad_nickname,
                      bad_password, bad_request, rate_limited, invite_quota_exhausted, invalid_slot,
                      no_semester, nickname_reserved, class_archived, method_not_allowed, internal,
@@ -1056,7 +1085,7 @@ components:
         ddl_conflict: {type: boolean, description: 标红}
         done: {type: boolean, description: 仅本人}
         source_count: {type: integer}
-        reminder_text: {type: [object, "null"], description: "预生成文案，键为 2d、1d、12h，可空"}
+        reminder_text: {type: [object, "null"], description: "预生成文案 {2d|1d|12h: {title, body}}，可缺键；DDL 变更时清空，AI 重新生成后写回（见 ai-contract.md 第 6 节）"}
         updated_at: {type: string, format: date-time, description: /sync 增量依据}
 
     Assignment:
@@ -1109,5 +1138,7 @@ components:
         kind: {type: string}
         status: {type: string, enum: [queued, running, done, failed, expired]}
         input: {type: object, description: 仅 worker 领取时返回}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time, description: 创建后 2 分钟，到期未完成即 expired}
         output: {type: [object, "null"]}
         error: {type: [string, "null"]}

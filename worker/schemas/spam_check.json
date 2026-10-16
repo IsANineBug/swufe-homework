@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["suspicious", "category", "reason"],
+  "properties": {
+    "suspicious": {"type": "boolean"},
+    "category": {"enum": ["ad", "unrelated", "abusive", "gibberish", null]},
+    "reason": {"type": "string", "maxLength": 100}
+  }
+}

@@ -291,9 +291,15 @@ CREATE TABLE ai_jobs (
   created_at   timestamptz NOT NULL DEFAULT now(),
   claimed_at   timestamptz,
   finished_at  timestamptz,
-  expires_at   timestamptz NOT NULL DEFAULT now() + interval '2 minutes'
+  expires_at   timestamptz NOT NULL DEFAULT now() + interval '2 minutes',
+  class_id     bigint REFERENCES classes(id),     -- 与某个班有关的任务
+  assignment_id bigint REFERENCES assignments(id), -- ddl_conflict / reminder_text（服务器自动发起）
+  worker_id    text                               -- 领取该任务的 worker
 );
 CREATE INDEX ai_jobs_queued ON ai_jobs (created_at) WHERE status = 'queued';
+CREATE INDEX ai_jobs_requester ON ai_jobs (requested_by, created_at) WHERE requested_by IS NOT NULL;
+CREATE INDEX ai_jobs_open ON ai_jobs (expires_at) WHERE status IN ('queued', 'running');
+-- 任务输入含作业正文，结束 24 小时后由服务器定时删除（不长期保存）。
 
 -- ---------- 种子数据 ----------
 INSERT INTO periods (no, starts_at, ends_at) VALUES
