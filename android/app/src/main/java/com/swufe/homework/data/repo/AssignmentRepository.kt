@@ -115,14 +115,15 @@ class AssignmentRepository @Inject constructor(
         job.id to json.decodeFromJsonElement(AiAssignmentDraft.serializer(), job.output ?: JsonObject(emptyMap()))
     }
 
-    /** dedupe_review：失败或超时返回 null，退回服务器的文字匹配结果。 */
+    /**
+     * dedupe_review：只传 candidate_ids（取自 /candidates），候选内容由服务器按 id 读取（ai-contract §3）。
+     * draft.ddl 为带 +08:00 的 ISO 时间。失败或超时返回 null，退回服务器的文字匹配结果。
+     */
     suspend fun aiDedupe(classId: Int, title: String, body: String, ddl: String?, candidates: List<AssignmentSummary>): AiDedupeOutput? =
         apiCall {
             val input = buildJsonObject {
                 putJsonObject("draft") { put("title", title); put("body", body); put("ddl", ddl) }
-                putJsonArray("candidates") {
-                    candidates.forEach { c -> add(buildJsonObject { put("id", c.id); put("title", c.title); put("ddl", c.ddl) }) }
-                }
+                putJsonArray("candidate_ids") { candidates.take(3).forEach { add(JsonPrimitive(it.id)) } }
             }
             val job = runJob("dedupe_review", classId, input, 30_000)
             json.decodeFromJsonElement(AiDedupeOutput.serializer(), job.output ?: JsonObject(emptyMap()))

@@ -2,6 +2,7 @@ package com.swufe.homework.data.repo
 
 import com.swufe.homework.data.api.AssignmentSummary
 import com.swufe.homework.data.api.HomeworkApi
+import com.swufe.homework.data.api.SwufeApi
 import com.swufe.homework.data.api.apiCall
 import com.swufe.homework.data.api.orThrow
 import com.swufe.homework.data.local.AssignmentDao
@@ -10,7 +11,6 @@ import com.swufe.homework.data.local.TimetableDao
 import com.swufe.homework.data.local.TokenStore
 import com.swufe.homework.reminder.ReminderPrefs
 import com.swufe.homework.reminder.ReminderScheduler
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -25,6 +25,7 @@ import javax.inject.Singleton
 @Singleton
 class ReminderSync @Inject constructor(
     private val api: HomeworkApi,
+    private val core: SwufeApi,
     private val dao: AssignmentDao,
     private val timetable: TimetableDao,
     private val scheduler: ReminderScheduler,
@@ -52,8 +53,17 @@ class ReminderSync @Inject constructor(
                     r.removedIds.forEach { scheduler.cancelWithNotification(it) }
                     dao.delete(r.removedIds)
                 }
-                pruneLeftClasses()
-                prefs.setCursor(r.now)
+                if (since != null && hasStaleClasses()) {
+                    // 缓存里有不在「我的班级」里的作业（退了班、班级被合并、另一台设备上变动）：
+                    // 不在本地猜，直接全量同步一次，以服务端结果为准。
+                    val full = api.sync(null)
+                    scheduler.cancelAll()
+                    dao.clear()
+                    applyLocked(full.changed)
+                    prefs.setCursor(full.now)
+                } else {
+                    prefs.setCursor(r.now)
+                }
                 Unit
             }
         }
@@ -93,14 +103,17 @@ class ReminderSync @Inject constructor(
         entities.forEach { scheduler.schedule(it) }
     }
 
-    /** 点了「不是我的班」的班，/sync 不一定会下发 removed_ids，按本地课表把它们清掉。 */
-    private suspend fun pruneLeftClasses() {
-        val mine = timetable.classes().first().map { it.id }.toSet()
-        if (mine.isEmpty()) return
-        val stale = dao.all().filter { it.classId !in mine }.map { it.id }
-        if (stale.isEmpty()) return
-        stale.forEach { scheduler.cancelWithNotification(it) }
-        dao.delete(stale)
+    /**
+     * 缓存里是否有不属于「我的班级」的作业。先 GET /me/classes 刷新本地课表（本地 my_class 只在课表页刷新，
+     * 可能过期）；刷新失败就当没有，跳过本次清理，绝不按过期的本地课表删缓存。
+     */
+    private suspend fun hasStaleClasses(): Boolean {
+        val cached = dao.all()
+        if (cached.isEmpty()) return false
+        val classes = runCatching { core.myClasses() }.getOrNull() ?: return false
+        runCatching { timetable.replaceAll(classes) }
+        val mine = classes.map { it.id }.toSet()
+        return cached.any { it.classId !in mine }
     }
 
     /** 退出登录 / 会话过期：取消全部提醒，清游标（表由调用方 clearAllTables）。 */

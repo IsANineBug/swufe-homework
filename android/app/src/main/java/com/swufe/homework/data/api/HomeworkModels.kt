@@ -82,7 +82,11 @@ data class AssignmentCreate(
 )
 
 @Serializable
-data class AssignmentPatch(val title: String? = null, val ddl: String? = null)
+data class AssignmentPatch(
+    val title: String? = null,
+    val ddl: String? = null,
+    @SerialName("ddl_uncertain") val ddlUncertain: Boolean? = null,
+)
 
 @Serializable
 data class SourceCreate(

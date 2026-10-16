@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -58,13 +59,15 @@ class ReminderGuideViewModel @Inject constructor(
     val scheduler: ReminderScheduler,
 ) : ViewModel() {
     suspend fun shouldShow(): Boolean = !prefs.guideDone.first()
+    /** 一进入引导就记为已展示：无论怎么离开（含系统返回键/手势），都不会再次自动弹出。 */
+    suspend fun markShown() = prefs.setGuideDone()
     fun done() { viewModelScope.launch { prefs.setGuideDone(); scheduler.rescheduleAll() } }
 }
 
 /** 首次进入主界面时自动打开一次提醒引导。 */
 @Composable
 fun FirstLaunchGuide(onShow: () -> Unit, vm: ReminderGuideViewModel = hiltViewModel()) {
-    LaunchedEffect(Unit) { if (vm.shouldShow()) onShow() }
+    LaunchedEffect(Unit) { if (vm.shouldShow()) { vm.markShown(); onShow() } }
 }
 
 /**
@@ -84,6 +87,7 @@ fun ReminderGuideScreen(onBack: () -> Unit, vm: ReminderGuideViewModel = hiltVie
     val batteryOk = remember(tick) { ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }
 
     val finish = { vm.done(); onBack() }
+    BackHandler { finish() }
     Scaffold(topBar = { BackTopBar("提醒设置", finish) }) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -147,25 +151,28 @@ private fun openBattery(ctx: Context) {
     ctx.tryStart(appDetails(ctx))
 }
 
-/** 各品牌自启动管理页（按顺序尝试），都打不开就进应用详情页。 */
+/** 各品牌自启动管理页；只尝试与本机厂商/品牌匹配的条目（避免误开别家页面），都打不开就进应用详情页。 */
+private data class AutoStart(val brands: List<String>, val pkg: String, val cls: String)
+
 private val AUTO_START = listOf(
-    "com.miui.securitycenter" to "com.miui.permcenter.autostart.AutoStartManagementActivity",
-    "com.huawei.systemmanager" to "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
-    "com.huawei.systemmanager" to "com.huawei.systemmanager.optimize.process.ProtectActivity",
-    "com.hihonor.systemmanager" to "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
-    "com.coloros.safecenter" to "com.coloros.safecenter.permission.startup.StartupAppListActivity",
-    "com.coloros.safecenter" to "com.coloros.safecenter.startupapp.StartupAppListActivity",
-    "com.oplus.safecenter" to "com.oplus.safecenter.permission.startup.StartupAppListActivity",
-    "com.vivo.permissionmanager" to "com.vivo.permissionmanager.activity.BgStartUpManagerActivity",
-    "com.iqoo.secure" to "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager",
-    "com.meizu.safe" to "com.meizu.safe.permission.SmartBGActivity",
-    "com.samsung.android.lool" to "com.samsung.android.sm.ui.battery.BatteryActivity",
-    "com.oneplus.security" to "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity",
+    AutoStart(listOf("xiaomi", "redmi", "poco"), "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+    AutoStart(listOf("huawei"), "com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+    AutoStart(listOf("huawei"), "com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"),
+    AutoStart(listOf("honor"), "com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+    AutoStart(listOf("oppo", "realme", "oneplus"), "com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+    AutoStart(listOf("oppo", "realme", "oneplus"), "com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+    AutoStart(listOf("oppo", "realme", "oneplus"), "com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity"),
+    AutoStart(listOf("vivo", "iqoo"), "com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
+    AutoStart(listOf("vivo", "iqoo"), "com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"),
+    AutoStart(listOf("meizu"), "com.meizu.safe", "com.meizu.safe.permission.SmartBGActivity"),
+    AutoStart(listOf("samsung"), "com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"),
+    AutoStart(listOf("oneplus"), "com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"),
 )
 
 private fun openAutoStart(ctx: Context) {
-    for ((pkg, cls) in AUTO_START) {
-        if (ctx.tryStart(Intent().setComponent(ComponentName(pkg, cls)))) return
+    val me = "${Build.MANUFACTURER} ${Build.BRAND}".lowercase()
+    for (e in AUTO_START.filter { a -> a.brands.any { it in me } }) {
+        if (ctx.tryStart(Intent().setComponent(ComponentName(e.pkg, e.cls)))) return
     }
     ctx.tryStart(appDetails(ctx))
 }

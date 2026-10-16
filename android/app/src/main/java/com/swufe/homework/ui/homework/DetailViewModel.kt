@@ -45,11 +45,15 @@ class DetailViewModel @Inject constructor(
     /** 从补充/编辑页返回时刷新。 */
     fun onResume() { if (resumed) load() else resumed = true }
 
+    /** 当前作业 id：请求的作业已被合并时，接口返回合并目标（id 不同），之后一律以目标 id 为准。 */
+    var curId: Int = id
+        private set
+
     fun load() {
         loading = true
         viewModelScope.launch {
-            repo.detail(id)
-                .onSuccess { a = it; error = null }
+            repo.detail(curId)
+                .onSuccess { curId = it.id; a = it; error = null }
                 .onFailure {
                     error = it.userMessage
                     if ((it as? com.swufe.homework.data.api.ApiException)?.http == 404) gone = true
@@ -66,7 +70,7 @@ class DetailViewModel @Inject constructor(
         val done = !cur.done
         a = cur.copy(done = done)
         viewModelScope.launch {
-            repo.setDone(id, done)
+            repo.setDone(cur.id, done)
                 .onSuccess { toast = if (done) "已标记完成，不再提醒" else "已取消完成，提醒已恢复" }
                 .onFailure { a = cur; error = it.userMessage }
         }
@@ -103,14 +107,14 @@ class DetailViewModel @Inject constructor(
         mergeTargets = null
         viewModelScope.launch {
             repo.classAssignments(cur.classId, null, null)
-                .onSuccess { l -> mergeTargets = l.filter { it.id != id } }
+                .onSuccess { l -> mergeTargets = l.filter { it.id != cur.id && it.id !in cur.mergedFrom } }
                 .onFailure { toast = it.userMessage; mergeTargets = emptyList() }
         }
     }
 
     fun propose(toId: Int) {
         viewModelScope.launch {
-            repo.proposeMerge(id, toId).onSuccess { toast = "已提议合并：首发者同意或 3 位同学赞同后执行"; load() }
+            repo.proposeMerge(curId, toId).onSuccess { toast = "已提议合并：首发者同意或 3 位同学赞同后执行"; load() }
                 .onFailure { toast = it.userMessage }
         }
     }
