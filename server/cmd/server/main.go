@@ -15,6 +15,7 @@ import (
 	"github.com/IsANineBug/swufe-homework/server/internal/api"
 	"github.com/IsANineBug/swufe-homework/server/internal/config"
 	"github.com/IsANineBug/swufe-homework/server/internal/httpx"
+	"github.com/IsANineBug/swufe-homework/server/internal/jobs"
 	"github.com/IsANineBug/swufe-homework/server/internal/store"
 )
 
@@ -80,6 +81,9 @@ func run() error {
 			}
 		}
 	}()
+
+	// WS2 定时任务：积分结算、合并提议过期、token 清理、图片清理
+	(&jobs.Runner{DB: pool, UploadDir: cfg.UploadDir}).Start(ctx)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,

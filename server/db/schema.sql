@@ -124,8 +124,11 @@ CREATE TABLE assignments (
   merged_into   bigint REFERENCES assignments(id),
   created_by    bigint NOT NULL REFERENCES users(id), -- 首发者
   created_at    timestamptz NOT NULL DEFAULT now(),
-  deleted_at    timestamptz                    -- 所有来源都被删除时随之删除
+  deleted_at    timestamptz,                   -- 所有来源都被删除时随之删除
+  updated_at    timestamptz NOT NULL DEFAULT now(), -- /sync 增量：删除、合并、改 DDL、加来源都会刷新
+  reminder_text jsonb                          -- 预生成提醒文案 {"2d","1d","12h"}，WS3 写入，DDL 变更时清空
 );
+CREATE INDEX assignments_class_updated ON assignments (class_id, updated_at);
 CREATE INDEX assignments_class_ddl ON assignments (class_id, ddl) WHERE deleted_at IS NULL AND merged_into IS NULL;
 CREATE INDEX assignments_title_trgm ON assignments USING gin (title gin_trgm_ops);
 
@@ -144,6 +147,7 @@ CREATE TABLE assignment_sources (
 );
 CREATE INDEX sources_assignment ON assignment_sources (assignment_id) WHERE deleted_at IS NULL;
 CREATE INDEX sources_author_day ON assignment_sources (author_id, created_at);
+CREATE INDEX sources_original ON assignment_sources (original_assignment_id);
 
 CREATE TABLE attachments (
   id            bigserial PRIMARY KEY,
@@ -155,8 +159,11 @@ CREATE TABLE attachments (
   thumb_path    text,
   bytes         int NOT NULL CHECK (bytes <= 10485760),
   created_at    timestamptz NOT NULL DEFAULT now(),
-  purged_at     timestamptz
+  purged_at     timestamptz,
+  mime          text NOT NULL DEFAULT 'application/octet-stream'
 );
+CREATE INDEX attachments_source ON attachments (source_id);
+CREATE INDEX attachments_unbound ON attachments (created_at) WHERE source_id IS NULL;  -- 上传后 24h 未发布的清理
 
 -- 完成状态：仅本人可见，只用于停止提醒
 CREATE TABLE completions (
@@ -165,6 +172,7 @@ CREATE TABLE completions (
   done_at        timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, assignment_id)
 );
+CREATE INDEX completions_assignment ON completions (assignment_id);
 
 -- ---------- 合并 ----------
 CREATE TABLE merge_proposals (
@@ -178,9 +186,12 @@ CREATE TABLE merge_proposals (
   created_at    timestamptz NOT NULL DEFAULT now(),
   applied_at    timestamptz,
   reverted_by   bigint REFERENCES users(id),   -- 管理员
+  snapshot      jsonb,                         -- 执行时搬动的行与合并前状态，撤销据此还原（字段见 0003 迁移）
   CHECK (from_id <> to_id)
 );
 CREATE UNIQUE INDEX one_pending_merge ON merge_proposals (from_id, to_id) WHERE status = 'pending';
+CREATE INDEX merge_proposals_pending ON merge_proposals (created_at) WHERE status = 'pending';
+CREATE INDEX merge_proposals_to ON merge_proposals (to_id);
 
 CREATE TABLE merge_votes (
   proposal_id  bigint NOT NULL REFERENCES merge_proposals(id),
@@ -207,6 +218,7 @@ CREATE TABLE post_bans (
   ends_at     timestamptz NOT NULL,
   lifted_at   timestamptz                      -- 管理员恢复内容后可解除
 );
+CREATE INDEX post_bans_user_class ON post_bans (user_id, class_id);
 
 -- 邀请树违规提醒：通知直接邀请人
 CREATE TABLE notices (
@@ -245,6 +257,8 @@ CREATE TABLE points_ledger (
 );
 CREATE INDEX points_user_day ON points_ledger (user_id, local_day) WHERE status = 'settled';
 CREATE INDEX points_class_time ON points_ledger (class_id, created_at) WHERE status = 'settled';
+CREATE INDEX points_pending ON points_ledger (settle_at) WHERE status = 'pending';
+CREATE INDEX points_source ON points_ledger (source_id);
 
 -- 规则变更公告（提前 7 天）
 CREATE TABLE announcements (

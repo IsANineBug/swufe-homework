@@ -151,7 +151,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	via, role := "", "user"
 	var inviter *int64
@@ -295,7 +295,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	var uid int64
 	var role string
 	err = tx.QueryRow(ctx, `UPDATE auth_tokens t SET revoked_at = now()
@@ -384,7 +384,7 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	// 以旧哈希为条件，防止同一恢复码被并发使用两次
 	tag, err := tx.Exec(ctx, `UPDATE users SET password_hash = $2, recovery_code_hash = $3 WHERE id = $1 AND recovery_code_hash = $4`,
 		uid, pwHash, newRecHash, recHash)
