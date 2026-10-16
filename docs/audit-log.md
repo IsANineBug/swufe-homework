@@ -15,3 +15,4 @@
 | 2026-10-16 | #7 [WS3] AI worker 与 /ai、/worker（ffaabeb） | 需修改 | 单独对 main 测试全过；与已通过的 #5 合并后冲突：迁移同号 0003 且重复加 reminder_text（0003_ai_jobs_links.up.sql:15）、两套 files 签名不兼容（files.go:51）、写 AI 结果不刷新 updated_at 致 /sync 收不到（jobs.go:526/538）；另 WS5 dedupe_review 须改发 candidate_ids |
 | 2026-10-16 | #6 [WS5] 复审 0101e88 | 需修改 | 上轮 4 项已修；新引入：DetailViewModel.kt:49 curId 声明在 init{load()} 之后，load 时为 0，所有详情页显示「已被删除或合并」，onSuccess 未重置 gone |
 | 2026-10-16 | #7 [WS3] 复审 ecf6563（变基到 95a81c3） | 通过 | 迁移改 0004、共用 WS2 files.Signer、写回刷新 updated_at 并由 WS2 写路径触发，测试全过；非阻塞：jobs.go:539 DDL 毫秒比较、改标题未清 reminder_text |
+| 2026-10-16 | #6 [WS5] 复审 b689e6d | 通过 | curId 移到 init 之前、成功时重置 gone，合并后立即取消旧 id 提醒；非阻塞：清空 stated_ddl 不下发、isMine 按昵称 |
