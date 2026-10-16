@@ -10,7 +10,8 @@
 | [server/db/schema.sql](server/db/schema.sql) | 数据库结构（PostgreSQL 16） |
 | [docs/ai-contract.md](docs/ai-contract.md) | AI 任务的输入输出与提示词 |
 | [docs/points-rules.md](docs/points-rules.md) | 积分规则（App 内展示） |
-| [docs/workstreams.md](docs/workstreams.md) | 6 条分工与开工指令 |
+| [docs/audit-log.md](docs/audit-log.md) | 审计记录（WS7 维护） |
+| [docs/workstreams.md](docs/workstreams.md) | 6 条开发分工 + 1 条审计的开工指令 |
 
 ## 目录
 ```
