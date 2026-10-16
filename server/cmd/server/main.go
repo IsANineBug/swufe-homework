@@ -51,7 +51,7 @@ func run() error {
 		if cfg.SemesterName != "" {
 			a, _ := time.Parse(time.DateOnly, cfg.SemesterStartsOn)
 			b, _ := time.Parse(time.DateOnly, cfg.SemesterEndsOn)
-			return store.SemesterSpec{Name: cfg.SemesterName, StartsOn: a, EndsOn: b}
+			return store.SemesterSpec{Name: cfg.SemesterName, StartsOn: a, EndsOn: b, Explicit: true}
 		}
 		return store.SemesterFor(time.Now().In(httpx.Shanghai))
 	}

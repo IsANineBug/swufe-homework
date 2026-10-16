@@ -45,3 +45,30 @@ func TestLimiter(t *testing.T) {
 		t.Fatal("window should slide")
 	}
 }
+
+func TestLimiterReserveCountsInFlight(t *testing.T) {
+	l := NewLimiter(3, time.Hour)
+	var dones []func(bool)
+	for i := 0; i < 3; i++ {
+		d, ok := l.Reserve("k")
+		if !ok {
+			t.Fatal("should reserve")
+		}
+		dones = append(dones, d)
+	}
+	if _, ok := l.Reserve("k"); ok {
+		t.Fatal("in-flight reservations must count")
+	}
+	dones[0](false) // 成功：释放
+	d, ok := l.Reserve("k")
+	if !ok {
+		t.Fatal("released slot should be reusable")
+	}
+	d(true)
+	dones[1](true)
+	dones[2](true)
+	dones[2](true) // 重复调用无效
+	if _, ok := l.Reserve("k"); ok {
+		t.Fatal("3 failures recorded, should be blocked")
+	}
+}

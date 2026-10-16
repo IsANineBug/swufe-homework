@@ -49,11 +49,43 @@ type Limiter struct {
 	limit  int
 	window time.Duration
 	hits   map[string][]time.Time
+	flight map[string]int // Reserve 预占、尚未结算的名额
 	now    func() time.Time
 }
 
 func NewLimiter(limit int, window time.Duration) *Limiter {
-	return &Limiter{limit: limit, window: window, hits: map[string][]time.Time{}, now: time.Now}
+	return &Limiter{limit: limit, window: window, hits: map[string][]time.Time{}, flight: map[string]int{}, now: time.Now}
+}
+
+// Reserve 原子地预占一个名额（已记录次数 + 在途预占 < 上限才成功）。
+// 返回的 done(count)：count=true 把预占转成一次记录（如登录失败），false 释放（如登录成功）。
+func (l *Limiter) Reserve(key string) (done func(count bool), ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cut := l.now().Add(-l.window)
+	n := l.flight[key]
+	for _, t := range l.hits[key] {
+		if !t.Before(cut) {
+			n++
+		}
+	}
+	if n >= l.limit {
+		return nil, false
+	}
+	l.flight[key]++
+	var once sync.Once
+	return func(count bool) {
+		once.Do(func() {
+			l.mu.Lock()
+			if l.flight[key]--; l.flight[key] <= 0 {
+				delete(l.flight, key)
+			}
+			l.mu.Unlock()
+			if count {
+				l.Allow(key)
+			}
+		})
+	}, true
 }
 
 // Blocked 只检查是否已达上限，不记录。

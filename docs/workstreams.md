@@ -138,7 +138,8 @@
 2. Nginx：自签证书（脚本生成，输出公钥 sha256 供 App 固定）、反代 /api、内部转发 /files（X-Accel-Redirect）、
    client_max_body_size 11m、按 IP 限流、传 X-Real-IP。
 3. .env.example：列出所有变量（DATABASE_URL、JWT_SECRET、WORKER_TOKEN、CAMPUS_CIDRS、UPLOAD_DIR、
-   BOOTSTRAP_ADMIN_TOKEN、TRUSTED_PROXY（默认 172.28.0.10/32，nginx 固定此 IP）、HTTP_ADDR 等），不含真实值。
+   BOOTSTRAP_ADMIN_TOKEN、TRUSTED_PROXY（默认 172.28.0.10/32，nginx 固定此 IP）、HTTP_ADDR、
+   SEMESTER_NAME / SEMESTER_STARTS_ON / SEMESTER_ENDS_ON（留空 = 按校历自动，不要预填固定学期）等），不含真实值。
 4. 备份：每日 03:30 pg_dump 压缩，保留 7 天；上传目录不备份（图片按学期清理）。写恢复步骤。
 5. GitHub Actions：
    - server：PR 跑 go test + golangci-lint；main 构建镜像（可推 GHCR）。

@@ -16,6 +16,8 @@ type SemesterSpec struct {
 	Name     string // 如 2026-2027-1（秋）、2026-2027-2（春）
 	StartsOn time.Time
 	EndsOn   time.Time
+	// Explicit 来自 SEMESTER_* 环境变量：同名学期已存在时以它的起止日期为准（覆盖按校历推算的日期）
+	Explicit bool
 }
 
 func date(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
@@ -25,11 +27,11 @@ func SemesterFor(day time.Time) SemesterSpec {
 	y, m := day.Year(), day.Month()
 	switch {
 	case m >= time.August: // 8 月假期 + 秋季学期上半段
-		return SemesterSpec{fmt.Sprintf("%d-%d-1", y, y+1), date(y, time.September, 1), date(y+1, time.February, 1)}
+		return SemesterSpec{fmt.Sprintf("%d-%d-1", y, y+1), date(y, time.September, 1), date(y+1, time.February, 1), false}
 	case m == time.January: // 秋季学期下半段
-		return SemesterSpec{fmt.Sprintf("%d-%d-1", y-1, y), date(y-1, time.September, 1), date(y, time.February, 1)}
+		return SemesterSpec{fmt.Sprintf("%d-%d-1", y-1, y), date(y-1, time.September, 1), date(y, time.February, 1), false}
 	default: // 2 月假期 + 春季学期
-		return SemesterSpec{fmt.Sprintf("%d-%d-2", y-1, y), date(y, time.March, 1), date(y, time.August, 1)}
+		return SemesterSpec{fmt.Sprintf("%d-%d-2", y-1, y), date(y, time.March, 1), date(y, time.August, 1), false}
 	}
 }
 
@@ -46,15 +48,18 @@ func EnsureCurrentSemester(ctx context.Context, pool *pgxpool.Pool, spec Semeste
 	}
 	var id int32
 	err = tx.QueryRow(ctx, `INSERT INTO semesters (name, starts_on, ends_on) VALUES ($1, $2, $3)
-		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
-		spec.Name, spec.StartsOn, spec.EndsOn).Scan(&id)
+		ON CONFLICT (name) DO UPDATE SET
+		  starts_on = CASE WHEN $4 THEN EXCLUDED.starts_on ELSE semesters.starts_on END,
+		  ends_on   = CASE WHEN $4 THEN EXCLUDED.ends_on ELSE semesters.ends_on END
+		RETURNING id`,
+		spec.Name, spec.StartsOn, spec.EndsOn, spec.Explicit).Scan(&id)
 	if err != nil {
 		return false, err
 	}
 	var curID *int32
 	_ = tx.QueryRow(ctx, `SELECT id FROM semesters WHERE is_current`).Scan(&curID)
 	if curID != nil && *curID == id {
-		return false, nil
+		return false, tx.Commit(ctx) // 提交可能的日期更新（Explicit）
 	}
 	if _, err := tx.Exec(ctx, `UPDATE semesters SET is_current = false, archived = true WHERE is_current AND id <> $1`, id); err != nil {
 		return false, err

@@ -48,3 +48,23 @@ func TestEnsureCurrentSemesterFromEnvSpec(t *testing.T) {
 		t.Fatalf("%+v %v", cur, err)
 	}
 }
+
+// 来自 SEMESTER_* 的同名学期覆盖按校历推算的日期；校历来源不覆盖已有日期。
+func TestEnsureCurrentSemesterExplicitUpdatesDates(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	auto := store.SemesterFor(time.Date(2026, 10, 16, 12, 0, 0, 0, httpx.Shanghai)) // 2026-2027-1，testdb 已建（9/7）
+	if _, err := store.EnsureCurrentSemester(ctx, pool, auto); err != nil {
+		t.Fatal(err)
+	}
+	if cur, _ := store.CurrentSemester(ctx, pool); cur.StartsOn != "2026-09-07" {
+		t.Fatalf("auto must not overwrite: %+v", cur)
+	}
+	exp := store.SemesterSpec{Name: auto.Name, StartsOn: time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC), EndsOn: time.Date(2027, 1, 20, 0, 0, 0, 0, time.UTC), Explicit: true}
+	if _, err := store.EnsureCurrentSemester(ctx, pool, exp); err != nil {
+		t.Fatal(err)
+	}
+	if cur, _ := store.CurrentSemester(ctx, pool); cur.StartsOn != "2026-09-08" || cur.EndsOn != "2027-01-20" {
+		t.Fatalf("explicit dates not applied: %+v", cur)
+	}
+}

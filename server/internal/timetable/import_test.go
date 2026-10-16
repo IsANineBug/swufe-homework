@@ -296,3 +296,47 @@ func TestImportMergeRecordsUndoSnapshot(t *testing.T) {
 		t.Fatalf("snapshot from=%d into=%d by=%d slots=%d members=%d into_members=%d name=%s", from, into, by, slots, members, intoMembers, intoName)
 	}
 }
+
+// 阻塞项回归：退班后再导入（多一个时段、完整课名、带教师）不得改写那个班，也不触发合并。
+func TestImportLeftClassIsUntouched(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	a := testdb.User(t, pool, "a")
+	b := testdb.User(t, pool, "b")
+	cid := imp(t, pool, a, timetable.SlotInput{Name: "大学…", Room: "R1", Weekday: 1, Start: 1, End: 2, Truncated: true}).Created[0].ID
+	other := imp(t, pool, a, slot("大学物理", "R9", 5, 1, 2)).Created[0].ID // 同名另一个班，b 的新时段会命中它
+	imp(t, pool, b, slot("大学物理", "R1", 1, 1, 2))
+	if _, err := pool.Exec(ctx, `UPDATE class_members SET left_at = now() WHERE class_id = $1 AND user_id = $2`, cid, b); err != nil {
+		t.Fatal(err)
+	}
+	var name0 string
+	if err := pool.QueryRow(ctx, `SELECT name FROM classes WHERE id = $1`, cid).Scan(&name0); err != nil {
+		t.Fatal(err)
+	}
+	teacher := "张老师"
+	r := imp(t, pool, b, timetable.SlotInput{Name: "大学物理", Room: "R1", Weekday: 1, Start: 1, End: 2, Teacher: &teacher},
+		slot("大学物理", "R8", 3, 1, 2), slot("大学物理", "R9", 5, 1, 2))
+	if len(r.Skipped) != 1 || r.Skipped[0].ID != cid || len(r.Merged) != 0 || len(r.Joined) != 0 || len(r.Created) != 0 {
+		t.Fatalf("r = %+v", r)
+	}
+	var name string
+	var tch *string
+	if err := pool.QueryRow(ctx, `SELECT name, teacher FROM classes WHERE id = $1`, cid).Scan(&name, &tch); err != nil {
+		t.Fatal(err)
+	}
+	if name != name0 || tch != nil {
+		t.Fatalf("class rewritten: name=%s teacher=%v", name, tch)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM class_slots WHERE class_id = $1`, cid); n != 1 {
+		t.Fatalf("slots = %d", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM class_slots WHERE class_id = $1`, other); n != 1 {
+		t.Fatalf("other slots = %d", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM class_merges`); n != 0 {
+		t.Fatal("no merge expected")
+	}
+	if n := count(t, pool, `SELECT count(*) FROM classes WHERE merged_into IS NOT NULL`); n != 0 {
+		t.Fatal("no merge expected")
+	}
+}

@@ -284,6 +284,27 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 			pcs = append(pcs, gHits...)
 			continue
 		}
+		// 本人点过「不是我的班」的班（issue #4 裁决 11）：这一组完全不动——不合并、不补时段、
+		// 不改课名和教师，只把这些班放进 skipped。hits 来自 merged_into IS NULL 的现存班。
+		if len(hits) > 0 {
+			ids := make([]int64, 0, len(hits))
+			for id := range hits {
+				ids = append(ids, id)
+			}
+			rows, err := tx.Query(ctx, `SELECT class_id FROM class_members
+				WHERE user_id = $1 AND class_id = ANY($2) AND left_at IS NOT NULL ORDER BY class_id`, userID, ids)
+			if err != nil {
+				return nil, err
+			}
+			left, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+			if err != nil {
+				return nil, err
+			}
+			if len(left) > 0 {
+				skippedIDs = append(skippedIDs, left...)
+				continue
+			}
+		}
 
 		var target int64
 		switch len(hits) {
@@ -339,7 +360,7 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 				return nil, err
 			}
 		}
-		// 加入。之前点过「不是我的班」（left_at 非空）的不自动加回
+		// 加入。合并后保留班里若有本人的退班记录（来自被并入的班），同样不自动加回
 		var left bool
 		err = tx.QueryRow(ctx, `WITH ins AS (
 				INSERT INTO class_members (class_id, user_id) VALUES ($1, $2)

@@ -243,10 +243,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	nick := timetable.CleanName(in.Nickname)
 	key := failKey("login", nick, r)
-	if s.FailLimiter.Blocked(key) {
+	// 原子预占一个失败名额，避免并发请求在计数前一起通过检查；成功则释放
+	done, reserved := s.FailLimiter.Reserve(key)
+	if !reserved {
 		httpx.Fail(w, r, errRateLimited)
 		return
 	}
+	failed := false
+	defer func() { done(failed) }()
 	var uid int64
 	var hash, role string
 	var disabled *time.Time
@@ -254,7 +258,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Scan(&uid, &hash, &role, &disabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, _ = auth.VerifyPassword(in.Password, dummyHash)
-		s.FailLimiter.Allow(key)
+		failed = true
 		httpx.Fail(w, r, errBadCredentials)
 		return
 	}
@@ -264,7 +268,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	ok, err := auth.VerifyPassword(in.Password, hash)
 	if err != nil || !ok || disabled != nil {
-		s.FailLimiter.Allow(key)
+		failed = true
 		httpx.Fail(w, r, errBadCredentials)
 		return
 	}
@@ -336,10 +340,14 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 	}
 	nick := timetable.CleanName(in.Nickname)
 	key := failKey("recover", nick, r)
-	if s.FailLimiter.Blocked(key) {
+	// 原子预占一个失败名额，避免并发请求在计数前一起通过检查；成功则释放
+	done, ok := s.FailLimiter.Reserve(key)
+	if !ok {
 		httpx.Fail(w, r, errRateLimited)
 		return
 	}
+	failed := false
+	defer func() { done(failed) }()
 	ctx := r.Context()
 	var uid int64
 	var recHash string
@@ -347,7 +355,7 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 		Scan(&uid, &recHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, _ = auth.VerifyPassword("x", dummyHash)
-		s.FailLimiter.Allow(key)
+		failed = true
 		httpx.Fail(w, r, errBadRecovery)
 		return
 	}
@@ -356,7 +364,7 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok, err := auth.VerifyPassword(auth.NormalizeRecoveryCode(in.RecoveryCode), recHash); err != nil || !ok {
-		s.FailLimiter.Allow(key)
+		failed = true
 		httpx.Fail(w, r, errBadRecovery)
 		return
 	}
