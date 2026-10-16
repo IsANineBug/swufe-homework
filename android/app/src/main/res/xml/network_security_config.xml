@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只允许 HTTPS。服务器自签证书的校验由 OkHttp 公钥固定完成（见 PinnedTrust.kt）。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
