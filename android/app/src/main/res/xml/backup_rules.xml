@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 及以下（allowBackup=false 时一般不生效，作为兜底）。 -->
+<full-backup-content>
+    <exclude domain="file" path="datastore/auth.preferences_pb" />
+    <exclude domain="database" path="swufe.db" />
+</full-backup-content>

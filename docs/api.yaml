@@ -805,7 +805,9 @@ components:
 
     Tokens:
       type: object
-      description: refresh 返回新的一对，旧 refresh token 立即作废
+      description: |
+        登录、注册、续期都返回新的一对 token。/auth/refresh 每次都轮换：返回新的 refresh_token，
+        旧 refresh_token 立即作废（issue #4 裁决 7）。
       required: [access_token, refresh_token, expires_in]
       properties:
         access_token: {type: string}
