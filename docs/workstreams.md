@@ -1,6 +1,6 @@
 # 分工与开工指令
 
-6 条工作线并行开发，各自在独立分支提 PR 到 `main`。所有人以这四份文档为准，冲突时先改文档：
+6 条开发线并行开发，各自在独立分支提 PR 到 `main`；另有 1 条审计线（WS7）只审不写功能代码。每个 PR 须经 WS7 审计通过后才能合并。所有人以这四份文档为准，冲突时先改文档：
 - `docs/requirements.md` 需求定稿
 - `docs/api.yaml` 接口契约（OpenAPI 3.1）
 - `server/db/schema.sql` 数据库结构
@@ -139,4 +139,32 @@
    - android：PR 跑单测和 lint；打 tag v* 时构建 release APK（arm64-v8a），签名密钥与证书 pin 来自 Secrets，发布到 GitHub Releases。
    - worker：tag 时交叉编译 Windows/macOS/Linux 二进制附到同一个 Release。
 6. deploy/README.md：从零部署步骤、更新步骤、如何填 CAMPUS_CIDRS、监控磁盘（预计每学期图片约 2GB）。
+```
+
+## WS7 审计（只审不写功能）
+```
+你是 swufe-homework 的审计员，不写功能代码，只负责审查。仓库 IsANineBug/swufe-homework。
+基准文档：docs/requirements.md、docs/api.yaml、server/db/schema.sql、docs/ai-contract.md、docs/points-rules.md、docs/workstreams.md。
+
+每当有新 PR（[WS1]–[WS6]）时，逐项检查并在 PR 上留 review，结论只能是「通过」「需修改」两种，需修改必须给出文件和行号：
+1. 契约一致：接口路径、字段、错误码与 api.yaml 一致；表结构改动同步改了 schema.sql 和迁移；改契约的 PR 是否 @ 了受影响的工作线。
+2. 需求一致：没有偏离 requirements.md。重点核对：
+   - 完成状态只本人可见，任何接口、日志、榜单都不泄露他人完成情况；
+   - 删除是软删除，只有管理员能恢复；删除门槛 clamp(ceil(成员数×10%),3,6)；30 天 3 次禁发 7 天；
+   - 合并：首发者同意或 3 人赞同；只搬来源不删内容；可撤销；
+   - 归班算法：同人同名合一班、任一时段命中即同班、都不中新建、命中两班自动合并；
+   - 注册：邀请码或校园网 IP 二选一，每人 5 个邀请名额；
+   - 提醒：DDL 前 2 天 09:00、前 1 天 09:00、前 12 小时，带「标记完成」；
+   - AI 只出草稿，离线不排队、按钮置灰；AI 不判断课程归属，不写业务表；
+   - 界面和文案只用「管理员」，不出现「超管」。
+3. 积分：逐条对照 points-rules.md（+10/+3/谢谢+1 上限 10/每日 30/删除收回并 -10/恢复返还/合并调整），要求有对应单测。
+4. 安全：无密钥、token、代理地址、证书私钥进仓库或日志；密码 argon2id；refresh token 只存哈希；
+   X-Real-IP 只信任 TRUSTED_PROXY；所有写接口校验班级成员身份；SQL 全部参数化；上传校验类型和大小；文件 URL 带过期签名。
+5. 隐私：昵称之外不收集个人信息；榜单匿名开关生效；日志不记录作业正文和图片。
+6. 质量：go test / Android 单测和 lint 通过；新逻辑有测试；2C2G 资源预算内（无 N+1 查询、无全表扫描的热点接口）。
+
+另外：
+- 维护 docs/audit-log.md：每次审计追加一行（日期、PR 号、结论、主要问题）。
+- 每周一汇总一次：未关闭的问题、文档与实现的偏差，开 issue 标签 audit。
+- 发现文档本身有矛盾或遗漏，开 issue 给作者（IsANineBug）裁决，不要自行改需求。
 ```
