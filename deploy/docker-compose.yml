@@ -46,11 +46,12 @@ services:
         ipv4_address: 172.28.0.20
     # 不对外暴露 5432
 
-  # 一次性：把上传卷属主改成 server 镜像的非 root 用户（uid 10001），否则新建命名卷是 root:root 755
+  # 一次性：把上传卷属主改成 server 镜像的非 root 用户（uid 10001），否则新建命名卷是 root:root 755。
+  # 必须 755：nginx worker 以 uid 101 运行，要能进目录读文件（X-Accel-Redirect）；WS2 子目录建 0755、文件 0644
   uploads-init:
     image: ${NGINX_IMAGE:-docker.m.daocloud.io/library/nginx:1.27-alpine}
     user: "0:0"
-    entrypoint: ["sh", "-c", "chown 10001:10001 /data/uploads && chmod 750 /data/uploads"]
+    entrypoint: ["sh", "-c", "chown 10001:10001 /data/uploads && chmod 755 /data/uploads"]
     volumes:
       - uploads:/data/uploads
     network_mode: none

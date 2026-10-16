@@ -47,7 +47,8 @@ deploy/
    ```
    - `POSTGRES_PASSWORD` 与 `DATABASE_URL` 里的密码保持一致。
    - `TRUSTED_PROXY=172.28.0.10/32`（compose 里 nginx 的固定地址），不要改成 0.0.0.0/0 或 172.16.0.0/12。
-   - `SEMESTER_NAME/SEMESTER_STARTS_ON/SEMESTER_ENDS_ON` 填当前学期，server 启动时自动创建。
+   - `SEMESTER_NAME/SEMESTER_STARTS_ON/SEMESTER_ENDS_ON` 一般留空，server 按校历自动推算并创建当前学期；
+     三个同时填才固定用这个学期，此后每学期都要手动改并重启 server，否则一直停在旧学期。
    - worker 段的变量不要放到服务器上。
 4. **证书**
    ```bash
@@ -62,7 +63,7 @@ deploy/
    docker compose up -d
    curl -k https://127.0.0.1:8443/healthz
    ```
-   `uploads-init` 是一次性服务：每次 `up` 时把上传卷属主改成 server 的非 root 用户（uid 10001）后退出，`docker compose ps -a` 里显示 Exited (0) 是正常的。
+   `uploads-init` 是一次性服务：每次 `up` 时把上传卷属主改成 server 的非 root 用户（uid 10001）、权限 755（nginx 以 uid 101 只读访问）后退出，`docker compose ps -a` 里显示 Exited (0) 是正常的。
 6. **放行端口**：云厂商安全组和 `ufw` 只开 22 和 8443。5432 不对外。
 7. **首个管理员**：App 用 `BOOTSTRAP_ADMIN_TOKEN` 注册后，把它从 `.env` 清空并 `docker compose up -d server`。
 8. **定时备份**：见下文。

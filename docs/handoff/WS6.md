@@ -1,9 +1,9 @@
 # WS6 交接（部署、备份、发布）
 
-更新：2026-10-16 15:30 +08:00
+更新：2026-10-16 16:10 +08:00
 
 ## 做到哪
-- PR #1 `[WS6]`，分支 `ws6-deploy`，未合并。WS7 首轮审计「需修改」，3 个阻塞 + 9 条建议已全部处理（逐条回复在 PR 里），等 WS7 复审。
+- PR #1 `[WS6]`，分支 `ws6-deploy`，未合并。WS7 首轮审计「需修改」，3 个阻塞 + 9 条建议已全部处理（逐条回复在 PR 里），WS7 复审（e2c746a）提出 N1 阻塞（上传目录 750 导致 nginx 403）及 N2/N3 建议，已在后续提交修复，等再次复审。
 - 已交付：`deploy/docker-compose.yml`、`deploy/nginx/nginx.conf`、`deploy/postgres/init/`、
   `deploy/scripts/{gen-cert,backup,restore}.sh`、`deploy/README.md`、`.env.example`、
   `.github/workflows/{server,android,deploy-check,release}.yml`。
@@ -17,7 +17,8 @@
 3. WS1 合入后确认：Dockerfile `ENV HTTP_ADDR=:8080` 和 HEALTHCHECK、`/healthz`、启动迁移、`TEST_DATABASE_URL`；
    `server.yml` 首次跑通，GHCR 推送后提醒作者把包设为 Public。上传卷属主由 compose 的 `uploads-init` 处理（uid 10001），
    若 WS1 改了 uid 要同步改。
-4. WS2：`/files/<相对路径>?exp=&sig=`，验签后 `X-Accel-Redirect: /_protected/<相对 UPLOAD_DIR 的路径>`（api.yaml 由 WS2 写）。
+4. WS2：上传子目录建 0755、文件 0644（`os.MkdirAll(…, 0o755)`、默认 umask 022 下的 `os.Create`），不要用 0750/0600——nginx 以 uid 101 读文件，否则 `/files` 全部 403（error_log 是 crit，日志里看不到）。
+   `/files/<相对路径>?exp=&sig=`，验签后 `X-Accel-Redirect: /_protected/<相对 UPLOAD_DIR 的路径>`（api.yaml 由 WS2 写）。
 5. WS4 合入后确认 `app/build.gradle.kts` 读 `SIGNING_*`、`SERVER_CERT_PIN`、`SERVER_BASE_URL`、`VERSION_NAME/VERSION_CODE`（裁决 #1，WS4 写进 workstreams.md），
    APK 输出在 `app/build/outputs/apk/release/`，`android.yml` 跑通。
 6. WS3：worker 根包可 `go build .`，支持 `-X main.version`；长轮询按 api.yaml 最长 25 秒（nginx 读超时 75 秒）。
