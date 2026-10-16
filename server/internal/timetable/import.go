@@ -237,7 +237,7 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	sem, err := store.CurrentSemester(ctx, tx)
 	if errors.Is(err, store.ErrNoSemester) {

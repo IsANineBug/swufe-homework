@@ -1,0 +1,14 @@
+DROP INDEX IF EXISTS sources_original;
+DROP INDEX IF EXISTS completions_assignment;
+DROP INDEX IF EXISTS post_bans_user_class;
+DROP INDEX IF EXISTS points_source;
+DROP INDEX IF EXISTS points_pending;
+DROP INDEX IF EXISTS attachments_unbound;
+DROP INDEX IF EXISTS attachments_source;
+ALTER TABLE attachments DROP COLUMN IF EXISTS mime;
+DROP INDEX IF EXISTS merge_proposals_to;
+DROP INDEX IF EXISTS merge_proposals_pending;
+ALTER TABLE merge_proposals DROP COLUMN IF EXISTS snapshot;
+DROP INDEX IF EXISTS assignments_class_updated;
+ALTER TABLE assignments DROP COLUMN IF EXISTS reminder_text;
+ALTER TABLE assignments DROP COLUMN IF EXISTS updated_at;

@@ -24,6 +24,10 @@ type Config struct {
 	SemesterName     string
 	SemesterStartsOn string
 	SemesterEndsOn   string
+	// WS2：上传目录与 /files 签名密钥（未设置时由 JWT_SECRET 派生）
+	UploadDir     string
+	FileURLSecret []byte
+	FileURLTTL    time.Duration
 }
 
 // DefaultTrustedProxy 只信任 docker 网络里固定 IP 的 nginx（与 WS6 docker-compose 约定）。
@@ -42,12 +46,18 @@ func Load() (*Config, error) {
 		SemesterName:        os.Getenv("SEMESTER_NAME"),
 		SemesterStartsOn:    os.Getenv("SEMESTER_STARTS_ON"),
 		SemesterEndsOn:      os.Getenv("SEMESTER_ENDS_ON"),
+		UploadDir:           getenv("UPLOAD_DIR", "/data/uploads"),
+		FileURLSecret:       []byte(os.Getenv("FILE_URL_SECRET")),
+		FileURLTTL:          time.Hour,
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL 未设置")
 	}
 	if len(c.JWTSecret) < 32 {
 		return nil, fmt.Errorf("JWT_SECRET 至少 32 个字符")
+	}
+	if len(c.FileURLSecret) > 0 && len(c.FileURLSecret) < 16 {
+		return nil, fmt.Errorf("FILE_URL_SECRET 至少 16 个字符（或留空，由 JWT_SECRET 派生）")
 	}
 	var err error
 	if c.CampusCIDRs, err = ParseCIDRs(os.Getenv("CAMPUS_CIDRS")); err != nil {

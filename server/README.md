@@ -13,7 +13,10 @@ internal/auth        argon2id、恢复码、邀请码、JWT、refresh token
 internal/netx        客户端 IP（只信任 TRUSTED_PROXY 的 X-Real-IP）、校园网判断、限流
 internal/store       公共查询（当前学期、班级装载、成员校验、迁移、连接池）
 internal/timetable   课表规范化与自动归班算法
-internal/api         HTTP 路由与处理器（WS1：账号与班级）
+internal/api         HTTP 路由与处理器（WS1：账号与班级；WS2：hw_*.go 作业、社区、积分、上传、管理员）
+internal/points      积分规则：流水、24h 结算、每日 30 分上限、删除收回/恢复返还、删除门槛（WS2）
+internal/files       上传路径校验与 /files 过期签名 URL（WS2）
+internal/jobs        同进程定时任务：积分结算、合并提议过期、token 清理、图片清理（WS2）
 internal/testdb      集成测试用数据库
 ```
 其他工作线（WS2/WS3）在 `internal/api` 的 `Router()` 里挂自己的路由；写接口校验成员可用 `store.IsMember`，管理员接口用 `api.RequireAdmin`。
@@ -58,6 +61,8 @@ docker build -t swufe-homework-server ./server
 | `REGISTER_PER_IP_HOUR` | 否 | 同一 IP 每小时注册次数，默认 30（校园网 NAT 共用出口，宽松） |
 | `LOG_LEVEL` | 否 | `debug`/`info`/`warn`/`error`，默认 info |
 | `SEMESTER_NAME` / `SEMESTER_STARTS_ON` / `SEMESTER_ENDS_ON` | 否 | 三个同时给：启动时确保该学期存在并设为当前学期（日期 `YYYY-MM-DD`） |
+| `UPLOAD_DIR` | 否 | 上传目录，默认 `/data/uploads`（与 nginx `/_protected/` 共享卷）。子目录建 0755、文件 0644 |
+| `FILE_URL_SECRET` | 否 | `/files` 签名密钥，≥16 字符；留空则由 `JWT_SECRET` 派生（两者不同） |
 
 学期：设置了 `SEMESTER_*` 以其为准；不设置则按校历自动生成和切换（秋季 9/1–次年 2/1，春季 3/1–8/1，2 月和 8 月归入下一学期），切换时旧学期归档为只读。管理员学期管理接口放下一版。
 
@@ -93,6 +98,40 @@ TEST_DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/hwtest?sslmode=disable
 | `GET /api/v1/classes/search?q=` | 课名前缀 / pg_trgm 相似度搜索 |
 | `GET /api/v1/classes/{id}` | 班级详情；已合并的班返回保留班，并带 `merged_from` |
 | `POST /api/v1/classes/{id}/join` | 手动加入当前学期的班（含退班后重新加入） |
+
+## 已实现接口（WS2）
+| 接口 | 说明 |
+|---|---|
+| `GET /api/v1/classes/{id}/assignments?from=&to=` | 班级页，按 DDL 日期浏览 |
+| `POST /api/v1/classes/{id}/assignments` | 首发（作业 + 首发来源 + 附件，+10 pending） |
+| `POST /api/v1/classes/{id}/assignments/candidates` | 发布前查重（近 7 天、DDL ±1 天、标题相似度取 3） |
+| `GET /api/v1/classes/{id}/leaderboard?scope=week\|semester` | 周榜 / 学期榜 / 课代表，匿名显示「匿名同学」 |
+| `GET /api/v1/feed` | 首页，跨班按 DDL 升序 |
+| `GET /api/v1/sync?since=` | 增量同步（changed / removed_ids） |
+| `GET/PATCH /api/v1/assignments/{id}` | 详情（已合并返回目标）；首发者改标题 / DDL |
+| `POST /api/v1/assignments/{id}/sources` | 补充（+3 pending），DDL 不一致标红 |
+| `PUT/DELETE /api/v1/assignments/{id}/done` | 完成状态，仅本人可见 |
+| `PATCH/DELETE /api/v1/sources/{id}` | 作者编辑 / 删除（删除不扣分，积分作废） |
+| `POST /api/v1/uploads` | 上传 jpeg/png/webp/pdf ≤10MB，图片生成 400px 缩略图 |
+| `GET /files/<路径>?exp=&sig=` | 验签后 `X-Accel-Redirect: /_protected/…` |
+| `POST /api/v1/sources/{id}/thanks` | 谢谢 +1（每条 ≤10） |
+| `POST /api/v1/sources/{id}/delete-votes` | 删除投票，门槛 clamp(ceil(成员×10%),3,6)，扣分、禁发、提醒邀请人 |
+| `POST /api/v1/merge-proposals`、`/{id}/accept`、`/{id}/votes` | 合并提议、首发者同意、3 人赞同 |
+| `GET /api/v1/me/points?cursor=` | 积分明细与汇总 |
+| `POST /api/v1/admin/sources/{id}/restore` | 恢复误删、返还积分、解除禁发 |
+| `POST /api/v1/admin/merge-proposals/{id}/revert` | 撤销作业合并 |
+| `GET /api/v1/admin/class-merges`、`POST …/{id}/revert` | 班级自动合并复核与撤销 |
+| `GET /api/v1/admin/deleted` | 最近 30 天被投票删除的内容 |
+| `POST /api/v1/admin/announcements` | 规则公告（生效 ≥7 天后），同时发通知 |
+
+定时任务（同进程）：每 10 分钟积分结算；每小时合并提议 7 天过期、清理过期或撤销超 1 天的 refresh token；
+每 6 小时清理早于上一学期的附件文件（标记 `purged_at`）和上传后 24 小时未发布的附件。
+
+## 积分实现要点（docs/points-rules.md）
+- 首发 / 补充写 `pending`，`settle_at = 发布 + 24h`；到点时来源仍在则 `settled`，按结算日（Asia/Shanghai）已得正分截断到每日 30 分，来源已删则 `void`。
+- 谢谢立即 `settled`，每条来源谢谢分 ≤10，同样受每日上限；同一用户的积分写入都先拿 `pg_advisory_xact_lock(2, user_id)`，防并发越过上限。
+- 投票删除：正分流水 `void`，写 `deleted_revoke`（0 分）与 `deleted_penalty`（-10）；管理员恢复时 `void` 改回（未到 24h 的回 `pending`），写 `restore_refund` +10。
+- 合并：from 的首发来源改为补充，`first_post` 作废，有新内容（正文非空或有附件）改记 `supplement` +3，状态沿用原流水；撤销按快照还原。
 
 ## 归班算法要点
 1. 本次提交里同名的时段合成一组（课名比较忽略空格、全半角、大小写）。标了 `truncated` 的课名是唯一一个完整课名的前缀时并入该组；能匹配多个不同完整课名时不自动归组，单独成组。

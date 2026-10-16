@@ -159,7 +159,7 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	// 锁住本人行，防止并发多发
 	var quota, used int
 	err = tx.QueryRow(ctx, `SELECT invite_quota, (SELECT count(*) FROM invite_codes WHERE owner_id = $1)

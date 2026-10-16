@@ -32,7 +32,7 @@ func TestSchemaMatchesMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// 扩展建在 public，两个 schema 共用
 	if _, err := tx.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public; CREATE EXTENSION IF NOT EXISTS btree_gist SCHEMA public`); err != nil {
