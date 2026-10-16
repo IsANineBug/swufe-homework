@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -49,22 +48,4 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		cfg.MaxConns = 20
 	}
 	return pgxpool.NewWithConfig(ctx, cfg)
-}
-
-// EnsureSemester 库里没有当前学期、且给了 SEMESTER_* 时创建并设为当前学期。
-func EnsureSemester(ctx context.Context, pool *pgxpool.Pool, name, startsOn, endsOn string) (bool, error) {
-	if name == "" {
-		return false, nil
-	}
-	if startsOn == "" || endsOn == "" {
-		return false, fmt.Errorf("SEMESTER_NAME 已设置，但缺少 SEMESTER_STARTS_ON / SEMESTER_ENDS_ON")
-	}
-	tag, err := pool.Exec(ctx, `INSERT INTO semesters (name, starts_on, ends_on, is_current)
-		SELECT $1, $2::date, $3::date, true
-		WHERE NOT EXISTS (SELECT 1 FROM semesters WHERE is_current)
-		ON CONFLICT (name) DO NOTHING`, name, startsOn, endsOn)
-	if err != nil {
-		return false, err
-	}
-	return tag.RowsAffected() == 1, nil
 }

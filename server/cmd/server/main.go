@@ -14,6 +14,7 @@ import (
 
 	"github.com/IsANineBug/swufe-homework/server/internal/api"
 	"github.com/IsANineBug/swufe-homework/server/internal/config"
+	"github.com/IsANineBug/swufe-homework/server/internal/httpx"
 	"github.com/IsANineBug/swufe-homework/server/internal/store"
 )
 
@@ -44,11 +45,31 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	if created, err := store.EnsureSemester(ctx, pool, cfg.SemesterName, cfg.SemesterStartsOn, cfg.SemesterEndsOn); err != nil {
+	// 学期按校历自动生成与切换：启动时一次，之后每小时检查
+	ensureSemester := func() error {
+		switched, err := store.EnsureCurrentSemester(ctx, pool, time.Now(), httpx.Shanghai)
+		if switched {
+			slog.Info("current semester switched", "name", store.SemesterFor(time.Now().In(httpx.Shanghai)).Name)
+		}
 		return err
-	} else if created {
-		slog.Info("created current semester", "name", cfg.SemesterName)
 	}
+	if err := ensureSemester(); err != nil {
+		return err
+	}
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := ensureSemester(); err != nil {
+					slog.Error("ensure semester", "err", err)
+				}
+			}
+		}
+	}()
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,

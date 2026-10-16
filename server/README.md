@@ -31,7 +31,6 @@ export DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/homework?sslmode=dis
 export JWT_SECRET="$(openssl rand -hex 32)"
 export BOOTSTRAP_ADMIN_TOKEN=dev-boot
 export CAMPUS_CIDRS=127.0.0.1          # 本机当成校园网，方便调试注册
-export SEMESTER_NAME=2026-2027-1 SEMESTER_STARTS_ON=2026-09-07 SEMESTER_ENDS_ON=2027-01-17
 go run ./cmd/server
 
 # 3. 试一下
@@ -57,8 +56,9 @@ docker build -t swufe-homework-server ./server
 | `TRUSTED_PROXY` | 否 | 只信任来自这些地址（nginx）的 `X-Real-IP`，逗号分隔 CIDR |
 | `BOOTSTRAP_ADMIN_TOKEN` | 否 | 库里没有任何用户时，带请求头 `X-Bootstrap-Token` 注册即成为管理员 |
 | `REGISTER_PER_IP_HOUR` | 否 | 同一 IP 每小时注册次数，默认 30（校园网 NAT 共用出口，宽松） |
-| `SEMESTER_NAME` / `SEMESTER_STARTS_ON` / `SEMESTER_ENDS_ON` | 否 | 库里没有当前学期时，启动时创建（日期 `YYYY-MM-DD`） |
 | `LOG_LEVEL` | 否 | `debug`/`info`/`warn`/`error`，默认 info |
+
+学期无需配置：按校历自动生成和切换（秋季 9/1–次年 2/1，春季 3/1–8/1，2 月和 8 月归入下一学期），切换时旧学期归档为只读。
 
 日志为 JSON（slog），只记方法、路由、状态码、耗时，不记请求体。
 
@@ -96,5 +96,6 @@ TEST_DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/hwtest?sslmode=disable
    - 课名相同 → 命中；课名不同 → 进 `conflicts`，**整组不入库**；
    - 无命中 → 新建班；命中 1 个 → 加入；命中多个 → 并到最早创建的班（成员、时段、作业、积分流水、禁发记录一起搬，旧班 `merged_into`）。
 3. 补全该班缺的时段；截断课名遇到完整课名时回填；教师选填，只补空值。
-4. 全程一个事务；并发时由 `class_slots` 的 EXCLUDE 约束兜底，冲突/死锁自动重试。
-5. 教室规范化：去 `@`、全角转半角、去空白、字母大写，如 `@经世楼 Ｇ１０１` → `经世楼G101`。
+4. 退出班级（「不是我的班」）后再次导入含该课的课表，会按规则重新加入。
+5. 全程一个事务；并发时由 `class_slots` 的 EXCLUDE 约束兜底，冲突/死锁自动重试。
+6. 教室规范化：去 `@`、全角转半角、去空白、字母大写，如 `@经世楼 Ｇ１０１` → `经世楼G101`。

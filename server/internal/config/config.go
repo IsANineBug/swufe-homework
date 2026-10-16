@@ -20,10 +20,6 @@ type Config struct {
 	AccessTTL           time.Duration
 	RefreshTTL          time.Duration
 	LogLevel            string
-	// 可选：库里没有当前学期时，启动时据此创建一个
-	SemesterName     string
-	SemesterStartsOn string
-	SemesterEndsOn   string
 }
 
 func Load() (*Config, error) {
@@ -36,9 +32,6 @@ func Load() (*Config, error) {
 		AccessTTL:           15 * time.Minute,
 		RefreshTTL:          30 * 24 * time.Hour,
 		LogLevel:            getenv("LOG_LEVEL", "info"),
-		SemesterName:        os.Getenv("SEMESTER_NAME"),
-		SemesterStartsOn:    os.Getenv("SEMESTER_STARTS_ON"),
-		SemesterEndsOn:      os.Getenv("SEMESTER_ENDS_ON"),
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL 未设置")
