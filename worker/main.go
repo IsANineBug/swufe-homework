@@ -1,6 +1,6 @@
-// swufe-worker：运行在作者电脑上的 AI 任务拉取程序。
+// swufe-worker：AI 任务拉取程序，和后端部署在同一台服务器上常驻（systemd 或 docker，见 README）。
 //
-// 主动连服务器（不需要公网 IP）：每 20 秒心跳，长轮询领取任务，经代理调用模型，
+// 主动连后端：每 20 秒心跳，长轮询领取任务，调用模型（需要时经 HTTPS_PROXY），
 // 用 JSON Schema 校验输出后回传。契约见 docs/ai-contract.md，用法见 worker/README.md。
 package main
 
@@ -12,10 +12,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
 )
+
+// defaultMemLimit 未设 GOMEMLIMIT 时的 Go 内存软上限（硬上限由 systemd MemoryMax / docker mem_limit 的 64M 兜底）。
+const defaultMemLimit = 48 << 20
 
 // version 由 release 构建注入：-ldflags "-X main.version=v1.2.3"
 var version = "dev"
@@ -30,6 +34,10 @@ func main() {
 		return
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	// 和后端同机，总内存控制在 64 MB 以内：没设 GOMEMLIMIT 环境变量时给 Go 一个 48 MiB 的软上限。
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(defaultMemLimit)
+	}
 	if err := run(*envPath, *check); err != nil {
 		slog.Error("退出", "err", err)
 		os.Exit(1)
@@ -57,7 +65,7 @@ func run(envPath string, checkOnly bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	w := &Worker{cfg: cfg, srv: NewServerClient(cfg)}
-	w.proc = &Processor{LLM: NewLLM(cfg), Images: w.srv}
+	w.proc = &Processor{LLM: NewLLM(cfg), Images: w.srv, MaxTokens: cfg.LLMMaxTokens}
 	if checkOnly {
 		if err := w.srv.Heartbeat(ctx, cfg.LLMModel); err != nil {
 			return fmt.Errorf("连服务器失败：%w", err)
@@ -66,6 +74,7 @@ func run(envPath string, checkOnly bool) error {
 		return nil
 	}
 	slog.Info("swufe-worker 启动", "version", version, "server", cfg.ServerURL.Host, "model", cfg.LLMModel,
+		"max_tokens", cfg.LLMMaxTokens, "temperature", tempLabel(cfg.LLMTemperature),
 		"concurrency", cfg.Concurrency, "proxy", cfg.Proxy != nil)
 	w.Run(ctx)
 	slog.Info("已停止")
@@ -171,7 +180,10 @@ func (w *Worker) handle(job *Job) {
 	msg := ""
 	if err != nil {
 		msg = err.Error()
-		if errors.Is(err, context.DeadlineExceeded) {
+		switch {
+		case errors.Is(err, ErrTruncated):
+			msg = "输出被截断"
+		case errors.Is(err, context.DeadlineExceeded):
 			msg = "超时（90 秒）"
 		}
 		out = nil
@@ -188,6 +200,13 @@ func (w *Worker) handle(job *Job) {
 	} else {
 		slog.Info("任务完成", "job", job.ID, "kind", job.Kind, "ms", time.Since(start).Milliseconds())
 	}
+}
+
+func tempLabel(t *float64) string {
+	if t == nil {
+		return "default"
+	}
+	return fmt.Sprint(*t)
 }
 
 func sleep(ctx context.Context, d time.Duration) {

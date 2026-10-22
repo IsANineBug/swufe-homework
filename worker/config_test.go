@@ -88,3 +88,39 @@ func TestWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestLLMGuardConfig(t *testing.T) {
+	m, _ := ParseDotEnv(goodEnv)
+	c, err := LoadConfig(m, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LLMMaxTokens != 32768 || c.LLMTemperature != nil {
+		t.Fatalf("defaults: max=%d temp=%v", c.LLMMaxTokens, c.LLMTemperature)
+	}
+	delete(m, "LLM_MODEL")
+	if c, _ = LoadConfig(m, noEnv); c.LLMModel != "google/gemini-3.8-flash" {
+		t.Fatalf("default model = %q", c.LLMModel)
+	}
+	for _, v := range []string{"4096", "65536"} {
+		m["LLM_MAX_TOKENS"] = v
+		if c, err := LoadConfig(m, noEnv); err != nil || c.LLMMaxTokens == 0 {
+			t.Errorf("%s: %v", v, err)
+		}
+	}
+	for _, v := range []string{"4095", "65537", "abc", "-1"} {
+		m["LLM_MAX_TOKENS"] = v
+		if _, err := LoadConfig(m, noEnv); err == nil || !strings.Contains(err.Error(), "LLM_MAX_TOKENS") {
+			t.Errorf("%s accepted: %v", v, err)
+		}
+	}
+	m["LLM_MAX_TOKENS"] = ""
+	m["LLM_TEMPERATURE"] = "0.3"
+	if c, err := LoadConfig(m, noEnv); err != nil || c.LLMTemperature == nil || *c.LLMTemperature != 0.3 {
+		t.Fatalf("temp: %v %v", c, err)
+	}
+	m["LLM_TEMPERATURE"] = "hot"
+	if _, err := LoadConfig(m, noEnv); err == nil || !strings.Contains(err.Error(), "LLM_TEMPERATURE") {
+		t.Fatalf("bad temp accepted: %v", err)
+	}
+}
