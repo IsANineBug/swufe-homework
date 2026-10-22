@@ -124,11 +124,31 @@ TEST_DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/hwtest?sslmode=disable
 | `POST /api/v1/admin/sources/{id}/restore` | 恢复误删、返还贡献值、解除禁发 |
 | `POST /api/v1/admin/merge-proposals/{id}/revert` | 撤销作业合并 |
 | `GET /api/v1/admin/class-merges`、`POST …/{id}/revert` | 班级自动合并复核与撤销 |
-| `GET /api/v1/admin/deleted` | 最近 30 天被投票删除的内容 |
+| `GET /api/v1/admin/deleted` | 最近 30 天被投票删除或（v2）管理员删除的内容 |
 | `POST /api/v1/admin/announcements` | 规则公告（生效 ≥7 天后），同时发通知 |
 
 定时任务（同进程）：每 10 分钟贡献值结算；每小时合并提议 7 天过期、清理过期或撤销超 1 天的 refresh token；
 每 6 小时清理早于上一学期的附件文件（标记 `purged_at`）和上传后 24 小时未发布的附件。
+
+## 已实现接口（WS8，v2）
+| 接口 | 说明 |
+|---|---|
+| `GET/POST /api/v1/classes/{id}/messages` | 班级频道：仅在班成员（管理员也不例外）；`after_id` 轮询、`before_id` 翻页；纯文字 1–300 字；每人每 10 秒 1 条、每小时 30 条（所有班合计，429 + Retry-After）；禁言 403 `muted`；隐藏班 409 `class_archived` |
+| `DELETE /api/v1/messages/{id}` | 作者删除自己的消息 |
+| `POST /api/v1/reports` | 举报来源 / 消息 / 班级 / 用户；须可见；未处理去重 409；每人每天 20 条 |
+| `GET /api/v1/admin/reports`、`POST …/{id}/resolve` | 举报列表（同一对象合并一行，消息附前后各 5 条）与处理 |
+| `GET /api/v1/admin/classes`、`PATCH …/{id}`、`POST …/{id}/hide`、`…/unhide`、`POST …/merge` | 班级清理：列表（suspicious 过滤）、改名、隐藏 / 恢复、手动合并（可用 class-merges revert 撤销） |
+| `DELETE /api/v1/admin/sources/{id}` | 直接删除来源（`penalize` 默认 true：收回并 -10、计入禁发次数） |
+| `DELETE /api/v1/admin/messages/{id}` | 删除频道消息 |
+| `GET /api/v1/admin/users?q=`、`GET/PATCH …/{id}` | 用户（只含 AdminUser 字段）、强制改昵称 |
+| `POST /api/v1/admin/users/{id}/sanctions`、`POST /api/v1/admin/sanctions/{id}/lift` | 禁言 / 全站禁发 / 封号（封号作废 refresh token，登录、续期与现有 access token 都 403 `account_disabled`）与解除 |
+| `POST /api/v1/admin/users/{id}/points` | 调整贡献值（`admin_adjust`，不计每日上限，明细可见原因） |
+| `GET /api/v1/admin/actions` | 管理员操作日志（所有 /admin 写操作同一事务记一行） |
+
+另：`/me` 返回 `restrictions`；`/me/classes` 返回 `last_message_id`；作业详情 `is_first_poster`、来源 `is_mine`、贡献值明细 `note`。
+被隐藏的班：`/me/classes`、`/classes/search`、导入归班、`/feed`、`/sync`（作业进 `removed_ids`）都看不到，成员收 `class_hidden` 通知。
+
+定时任务（v2 新增）：每分钟把到期的有期限封号解封；每天 04:00（Asia/Shanghai）硬删 30 天前的频道消息及每班超出最近 500 条的部分。
 
 ## 贡献值实现要点（docs/points-rules.md）
 - 首发 / 补充写 `pending`，`settle_at = 发布 + 24h`；到点时来源仍在则 `settled`，按结算日（Asia/Shanghai）已得正分截断到每日 30 分，来源已删则 `void`。

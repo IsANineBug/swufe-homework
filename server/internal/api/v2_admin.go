@@ -75,7 +75,7 @@ func loadAdminUsers(ctx context.Context, q store.Q, ids []int64, now time.Time) 
 			WHERE p.user_id = ANY($1) AND p.status = 'settled' AND $2::timestamptz IS NOT NULL GROUP BY p.user_id`,
 			func(u *adminUser, n int) { u.ContributionTotal = n }},
 		{`SELECT author_id, count(*)::int FROM assignment_sources
-			WHERE author_id = ANY($1) AND deleted_reason IN ('vote','admin') AND deleted_at > $2 - interval '30 days'
+			WHERE author_id = ANY($1) AND deleted_reason IN ('vote','admin') AND deleted_at > $2::timestamptz - interval '30 days'
 			GROUP BY author_id`,
 			func(u *adminUser, n int) { u.DeletedContent30d = n }},
 		{`SELECT target_id, count(*)::int FROM reports

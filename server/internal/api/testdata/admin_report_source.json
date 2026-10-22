@@ -1,0 +1,20 @@
+{
+  "handled_at": "null",
+  "id": "number",
+  "reporters": [
+    {
+      "created_at": "string",
+      "nickname": "string",
+      "reason": "string"
+    }
+  ],
+  "resolution": "null",
+  "target": {
+    "author_nickname": "string",
+    "body": "string",
+    "class_name": "string",
+    "thumb_urls": []
+  },
+  "target_id": "number",
+  "target_kind": "string"
+}

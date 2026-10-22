@@ -106,3 +106,19 @@ func TestJobs(t *testing.T) {
 		}
 	}
 }
+
+func TestNextDailyRun(t *testing.T) {
+	sh := time.FixedZone("CST", 8*3600)
+	cases := []struct{ now, want string }{
+		{"2026-10-23T03:59:59+08:00", "2026-10-23T04:00:00+08:00"},
+		{"2026-10-23T04:00:00+08:00", "2026-10-24T04:00:00+08:00"},
+		{"2026-10-23T19:00:00Z", "2026-10-24T04:00:00+08:00"}, // UTC 19:00 = 上海次日 03:00
+	}
+	for _, c := range cases {
+		now, _ := time.Parse(time.RFC3339, c.now)
+		want, _ := time.Parse(time.RFC3339, c.want)
+		if got := jobs.NextDailyRun(now, 4); !got.Equal(want) {
+			t.Errorf("NextDailyRun(%s) = %s, want %s", c.now, got.In(sh), want.In(sh))
+		}
+	}
+}

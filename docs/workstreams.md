@@ -65,7 +65,7 @@
 先读 docs/requirements.md、docs/api.yaml、server/db/schema.sql、docs/points-rules.md。
 
 1. 作业：/classes/{id}/assignments（GET 按日期、POST 首发）、candidates 查重（近 7 天、DDL ±1 天、
-   pg_trgm similarity 排序取 3）、/assignments/{id}（GET/PATCH）、来源补充/编辑/删除、/feed、/sync 增量同步。
+   标题字符二元组相似度排序取 3；实际实现见 api.yaml 的 candidates 说明，未用 pg_trgm）、/assignments/{id}（GET/PATCH）、来源补充/编辑/删除、/feed、/sync 增量同步。
    校验：必须是班级成员；禁发期 403；每人每班每天 5 条（按 Asia/Shanghai 日期，被删除的不计）；有图片则 DDL 必填。
    补充的 stated_ddl 与作业 DDL 不同 → ddl_conflict = true。
 2. 上传：/uploads 收 multipart，限 10MB，只接受 jpeg/png/webp/pdf；图片生成 400px 缩略图；
