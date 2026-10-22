@@ -54,6 +54,7 @@
    - /me 返回 restrictions；新通知 kind：sanction、nickname_reset、points_adjusted、class_hidden。
 5. 小字段：Assignment.is_first_poster、Source.is_mine（按用户 id）；PointsEntry.note。
 6. 「积分」→「贡献值」：所有返回给用户的 message、通知文案、公告模板里的「积分」改成「贡献值」。字段名、表名、变量名不改。
+   worker 已改在服务器上跑：ai_offline 的提示「电脑未在线，请手动录入」（ai/jobs.go:22）改为「AI 暂时不可用，请手动录入」；注释里的「电脑端」可顺手改。
 7. issue #8 后端项全部修掉并在 issue 里勾选：WS1 两项、WS2 五项（含 docs/ai-contract.md:66、docs/workstreams.md:68 的 pg_trgm 文字）、
    WS3 的 jobs.go:539（date_trunc 秒级比较）和 hw_assignments.go:435（只改标题也清空 reminder_text）。
    TLS VerifyConnection 那项只在代码里加注释说明，不用改。
@@ -69,7 +70,7 @@
 你负责 /worker。仓库 IsANineBug/swufe-homework，从 main 拉分支 ws9-worker-guard，PR 标题前缀 [WS9]。只改 /worker、.env.example 的 worker 段和 worker/README.md。
 先读 docs/ai-contract.md、docs/requirements.md 第三节和第十三节第 2 条、worker/ 全部代码。
 
-背景：现在作者电脑上跑的是 gemini-3.8-flash-high（经 Command Code，思考等级固定 high）。2026-10-21 用同一张第 6 周课表实测 6 次：
+背景：worker 现在部署在服务器上（与后端同一台 2 核 2 GB，不再在作者电脑上跑），用的是 gemini-3.8-flash-high（经 Command Code，思考等级固定 high）。2026-10-21 用同一张第 6 周课表实测 6 次：
 5 次成功（计时两次 37 秒、51 秒，12 节课全对），1 次「超时（90 秒）」失败；顶部被裁掉的两节课（周四、周五第 3 节起）没有一次标 start_visible=false；第一次把一门 5–6 节的课识别成只有第 5 节。
 
 1. 模型：config.go 默认 LLM_MODEL 改为 Command Code 上 gemini-3.8-flash-high 的真实 id——先 GET {LLM_BASE_URL}/models 核对（可能带厂商前缀），
@@ -84,7 +85,9 @@
    - 提示词明确：课块顶边贴着截图顶部（或被表头遮住）时必须 start_visible=false；底边贴着截图底部时同理在 room/name 截断处标 truncated。
    - 后处理：按课块在图里的位置对齐节次刻度（左侧时间轴），课块跨两行以上不得只给一节；不确定时宁可标 start_visible=false 让用户核对。
    - 课名末尾的「▲」等符号原样保留与否按 ai-contract.md 的规定执行（若契约没写，开 issue 问作者，不自行决定）。
-8. 回归测试：docs/seed-timetable/ 目前没有样例，TestTimetableRegression 跑不了。作者提供脱敏截图后放进去并写期望值；
+8. 部署在服务器上：worker/README.md 把「电脑开机自启 / 只在 12:00–24:00 运行」改为服务器上的运行方式（systemd 或 docker，崩溃自动重启）；
+   内存控制在 64 MB 以内（Go 默认即可，WORKER_CONCURRENCY 默认 2 不变），图片处理不要整批读进内存；连 Command Code 是否需要 HTTPS_PROXY 以服务器实际网络为准，README 两种都写。
+9. 回归测试：docs/seed-timetable/ 目前没有样例，TestTimetableRegression 跑不了。作者提供脱敏截图后放进去并写期望值；
    在拿到截图前，用假模型测：截断不重试（模型只被调 1 次）、<30 秒不重试、Schema 不合格重试 1 次、请求体含 max_tokens、不传 temperature。
 交付：PR 描述写清新变量、默认值和测试结果（不贴密钥、不贴课表原图）。
 ```
@@ -127,8 +130,9 @@ PR② 底座改动（使用 PR① 的组件，把你负责的页面都按规范�
    - 不用 WorkManager/前台服务；不改服务器接口和 2 分钟过期。
    - WS11 的 PublishViewModel 改用 tracker 时，由你在 PR② 里一并改那一处调用（PublishViewModel.kt 的 parse_assignment），并 @ WS11。
 8. 课表导入确认页：任一课 start_visible=false 或截断时，页顶提示「截图上方/下方可能被裁掉，建议补截另一半一起识别」+「再加一张」按钮（最多 2 张，与现有一致）。
-9. 「我的」页加处罚提示：/me 的 restrictions 非空时显示「你被禁言/禁发到 X，原因：…」。
-10. 你负责的页面全部用 EmptyState/LoadingState/ErrorState，不再出现空白屏或只有一行灰字。
+9. 文案：「电脑未在线，请手动添加」等提到「电脑」的 AI 离线提示，统一改为「AI 暂时不可用，请手动添加」，「电脑正在识别…」改为「正在识别…」（worker 已改在服务器上跑；PublishScreen/PublishViewModel 里的两处也由你改，@ WS11）。
+10. 「我的」页加处罚提示：/me 的 restrictions 非空时显示「你被禁言/禁发到 X，原因：…」。
+11. 你负责的页面全部用 EmptyState/LoadingState/ErrorState，不再出现空白屏或只有一行灰字。
 测试（PR 描述逐条打勾）：浅色/深色截图；后台识图 5 个场景（去别的页面、退到桌面收通知、划掉 App 2 分钟内重开、超过 2 分钟重开显示超时、重复点识别不新建）；
 单测：AiJobTracker 恢复逻辑与去重。全仓 grep 用户可见字符串不得再有「闹钟」「积分」「自启动」。
 ```
@@ -176,5 +180,5 @@ WS8 未合并前：按 api.yaml 写接口层，用假数据/假服务器把界�
 ```
 
 ## 发布 v0.0.1-rc2（作者或作者本地的 agent）
-全部 PR 合并后：按 `docs/handoff/RELEASE.md` 的步骤部署服务器（会跑迁移 0005）、更新电脑上的 worker 和 `.env`（新增 LLM_MAX_TOKENS，LLM_TEMPERATURE 留空），
+全部 PR 合并后：按 `docs/handoff/RELEASE.md` 的步骤部署服务器（会跑迁移 0005）、更新服务器上的 worker 和它的 `.env`（新增 LLM_MAX_TOKENS，LLM_TEMPERATURE 留空），
 打 tag `v0.0.1-rc2`，按发布清单重测，并加测：后台识图 5 个场景、频道限频与禁言、管理员隐藏班级/删除/处罚/恢复、首页四个切换、首发者编辑。
