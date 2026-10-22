@@ -50,19 +50,42 @@ func (s *Server) importTimetable(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, res)
 }
 
+// myClass /me/classes 的元素：Class + v2 的 last_message_id（只有这个接口返回）。
+type myClass struct {
+	store.Class
+	LastMessageID *int64 `json:"last_message_id"`
+}
+
+// myClasses 我在当前学期在班、未被管理员隐藏的班。last_message_id 用一条带索引（class_messages_class）的
+// 相关子查询取，和班级列表同一条 SQL，无 N+1。
 func (s *Server) myClasses(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	rows, err := s.DB.Query(ctx, `SELECT c.id FROM class_members m
+	rows, err := s.DB.Query(ctx, `SELECT c.id,
+		(SELECT cm.id FROM class_messages cm WHERE cm.class_id = c.id AND cm.deleted_at IS NULL ORDER BY cm.id DESC LIMIT 1)
+		FROM class_members m
 		JOIN classes c ON c.id = m.class_id
 		JOIN semesters se ON se.id = c.semester_id AND se.is_current
-		WHERE m.user_id = $1 AND m.left_at IS NULL AND c.merged_into IS NULL
+		WHERE m.user_id = $1 AND m.left_at IS NULL AND c.merged_into IS NULL AND c.hidden_at IS NULL
 		ORDER BY c.name, c.id`, currentUser(r).ID)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
-	if err != nil {
+	var ids []int64
+	last := map[int64]*int64{}
+	for rows.Next() {
+		var id int64
+		var lm *int64
+		if err := rows.Scan(&id, &lm); err != nil {
+			rows.Close()
+			httpx.Fail(w, r, err)
+			return
+		}
+		ids = append(ids, id)
+		last[id] = lm
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
@@ -71,7 +94,11 @@ func (s *Server) myClasses(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, cs)
+	out := make([]myClass, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, myClass{Class: c, LastMessageID: last[c.ID]})
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 // leaveClass「不是我的班」：软退出（left_at），幂等。
@@ -111,6 +138,9 @@ func (s *Server) getClass(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Fail(w, r, httpx.ErrNotFound)
 		return
+	}
+	if err == nil {
+		err = hiddenFromUser(ctx, s.DB, id, r)
 	}
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -155,9 +185,13 @@ func (s *Server) joinClass(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if err := hiddenFromUser(ctx, s.DB, id, r); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
 	tag, err := s.DB.Exec(ctx, `INSERT INTO class_members (class_id, user_id)
 		SELECT c.id, $2 FROM classes c JOIN semesters se ON se.id = c.semester_id AND se.is_current AND NOT se.archived
-		WHERE c.id = $1
+		WHERE c.id = $1 AND c.hidden_at IS NULL
 		ON CONFLICT (class_id, user_id) DO UPDATE SET left_at = NULL`, id, currentUser(r).ID)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -175,7 +209,7 @@ func (s *Server) joinClass(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, cs[0])
 }
 
-// searchClasses 当前学期课名模糊搜索：前缀命中优先，其次 pg_trgm 相似度；最多 20 条。
+// searchClasses 当前学期课名模糊搜索（不含被管理员隐藏的班）：前缀命中优先，其次 pg_trgm 相似度；最多 20 条。
 func (s *Server) searchClasses(w http.ResponseWriter, r *http.Request) {
 	q := timetable.StripEllipsis(timetable.CleanName(r.URL.Query().Get("q")))
 	if q == "" {
@@ -190,7 +224,7 @@ func (s *Server) searchClasses(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rows, err := s.DB.Query(ctx, `SELECT c.id FROM classes c
 		JOIN semesters se ON se.id = c.semester_id AND se.is_current
-		WHERE c.merged_into IS NULL
+		WHERE c.merged_into IS NULL AND c.hidden_at IS NULL
 		  AND (c.name ILIKE $1 || '%' OR c.name ILIKE '%' || $1 || '%' OR c.name % $2)
 		ORDER BY (c.name ILIKE $1 || '%') DESC, similarity(c.name, $2) DESC, c.id
 		LIMIT 20`, esc, q)

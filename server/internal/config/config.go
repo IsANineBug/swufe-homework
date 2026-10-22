@@ -20,7 +20,7 @@ type Config struct {
 	AccessTTL           time.Duration
 	RefreshTTL          time.Duration
 	LogLevel            string
-	// WorkerToken 电脑端 worker 的 Bearer 令牌；为空则 /worker/* 一律 401（AI 始终离线）
+	// WorkerToken worker 的 Bearer 令牌；为空则 /worker/* 一律 401（AI 始终离线）
 	WorkerToken string
 	// WorkerTokenPlaceholder WORKER_TOKEN 仍是 .env.example 的 CHANGE_ME 占位值，按未设置处理（main 打警告）
 	WorkerTokenPlaceholder bool

@@ -82,7 +82,7 @@ func run() error {
 		}
 	}()
 
-	// WS2 定时任务：积分结算、合并提议过期、token 清理、图片清理
+	// WS2 定时任务：贡献值结算、合并提议过期、token 清理、图片清理
 	(&jobs.Runner{DB: pool, UploadDir: cfg.UploadDir}).Start(ctx)
 
 	app := api.New(cfg, pool)

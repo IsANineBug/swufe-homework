@@ -160,3 +160,36 @@ func PgCode(err error) string {
 	}
 	return ""
 }
+
+// ChatRetention 班级频道只保留最近 30 天；ChatKeepPerClass 每班最多保留最近 500 条（v2）。
+const (
+	ChatRetention    = 30 * 24 * time.Hour
+	ChatKeepPerClass = 500
+)
+
+// PurgeMessages 频道保留策略（每天 04:00 由 jobs 调用）：硬删 30 天前的消息，以及每班超出最近 500 条的部分。
+func PurgeMessages(ctx context.Context, q Q, now time.Time) (int64, error) {
+	a, err := q.Exec(ctx, `DELETE FROM class_messages WHERE created_at < $1`, now.Add(-ChatRetention))
+	if err != nil {
+		return 0, err
+	}
+	b, err := q.Exec(ctx, `DELETE FROM class_messages m USING (
+			SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY class_id ORDER BY id DESC) AS rn
+			                FROM class_messages) x WHERE x.rn > $1) d
+		WHERE m.id = d.id`, ChatKeepPerClass)
+	if err != nil {
+		return 0, err
+	}
+	return a.RowsAffected() + b.RowsAffected(), nil
+}
+
+// ExpireDisables 有期限的封号到期后清空 users.disabled_at（userID = 0 表示全部用户）。
+// 只处理有过 disable 处罚、且当前没有生效中的 disable 处罚的账号。
+func ExpireDisables(ctx context.Context, q Q, userID int64, now time.Time) error {
+	_, err := q.Exec(ctx, `UPDATE users u SET disabled_at = NULL
+		WHERE u.disabled_at IS NOT NULL AND ($1 = 0 OR u.id = $1)
+		  AND EXISTS (SELECT 1 FROM user_sanctions s WHERE s.user_id = u.id AND s.kind = 'disable')
+		  AND NOT EXISTS (SELECT 1 FROM user_sanctions s WHERE s.user_id = u.id AND s.kind = 'disable'
+		                  AND s.lifted_at IS NULL AND s.starts_at <= $2 AND (s.ends_at IS NULL OR s.ends_at > $2))`, userID, now)
+	return err
+}

@@ -1,4 +1,4 @@
-// Package ai 服务器侧 AI 任务：/ai/*（App）与 /worker/*（电脑端 worker）。契约见 docs/ai-contract.md。
+// Package ai 服务器侧 AI 任务：/ai/*（App）与 /worker/*（worker，v2 起部署在服务器上）。契约见 docs/ai-contract.md。
 //
 // 要点：
 //   - worker 心跳 60 秒内算在线；离线时 POST /ai/jobs 直接 409 ai_offline，不排队。

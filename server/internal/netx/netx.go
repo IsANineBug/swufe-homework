@@ -76,13 +76,14 @@ func (l *Limiter) Reserve(key string) (done func(count bool), ok bool) {
 	var once sync.Once
 	return func(count bool) {
 		once.Do(func() {
+			// 释放预占与记录一次在同一临界区内完成（issue #8），中间不会有别的 Reserve 插进来多拿名额
 			l.mu.Lock()
+			defer l.mu.Unlock()
 			if l.flight[key]--; l.flight[key] <= 0 {
 				delete(l.flight, key)
 			}
-			l.mu.Unlock()
 			if count {
-				l.Allow(key)
+				l.allowLocked(key)
 			}
 		})
 	}, true
@@ -106,6 +107,11 @@ func (l *Limiter) Blocked(key string) bool {
 func (l *Limiter) Allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.allowLocked(key)
+}
+
+// allowLocked 同 Allow，调用方须已持有 l.mu。
+func (l *Limiter) allowLocked(key string) bool {
 	now := l.now()
 	cut := now.Add(-l.window)
 	h := l.hits[key]

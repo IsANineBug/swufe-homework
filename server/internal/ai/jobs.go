@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	errAiOffline     = httpx.E(http.StatusConflict, "ai_offline", "电脑未在线，请手动录入")
+	errAiOffline     = httpx.E(http.StatusConflict, "ai_offline", "AI 暂时不可用，请手动录入")
 	errBadInput      = func(msg string) *httpx.Error { return httpx.E(http.StatusBadRequest, "bad_input", msg) }
 	errBadAttachment = httpx.E(http.StatusBadRequest, "bad_attachment", "图片不存在、不是本人上传或已清理")
 	errNotMember     = httpx.E(http.StatusForbidden, "not_member", "你不是这个班的成员")
@@ -511,7 +511,8 @@ func applyWriteback(ctx context.Context, tx pgx.Tx, kind string, assignmentID in
 	case KindReminderText:
 		var in struct {
 			Assignment struct {
-				DDL string `json:"ddl"`
+				Title string `json:"title"`
+				DDL   string `json:"ddl"`
 			} `json:"assignment"`
 			Slot string `json:"slot"`
 		}
@@ -533,10 +534,12 @@ func applyWriteback(ctx context.Context, tx pgx.Tx, kind string, assignmentID in
 			return fmt.Errorf("reminder input ddl: %w", err)
 		}
 		val, _ := json.Marshal(map[string]reminderOut{in.Slot: out})
-		// DDL 已变（与生成时不同）则不写：WS2 改 DDL 时已清空 reminder_text 并重新发起。刷新 updated_at 供 /sync 下发
+		// DDL 或标题已变（与生成时不同）则不写：WS2 改 DDL/标题时已清空 reminder_text 并重新发起。刷新 updated_at 供 /sync 下发。
+		// DDL 按秒比较（issue #8）：库里的 DDL 可能带毫秒，而任务输入里的 DDL 是 RFC3339 秒级。
 		_, err = tx.Exec(ctx, `UPDATE assignments SET
 				reminder_text = coalesce(reminder_text, '{}'::jsonb) || $3::jsonb, updated_at = now()
-			WHERE id = $1 AND ddl = $2 AND deleted_at IS NULL`, assignmentID, ddl, val)
+			WHERE id = $1 AND date_trunc('second', ddl) = $2 AND ($4 = '' OR title = $4) AND deleted_at IS NULL`,
+			assignmentID, ddl, val, in.Assignment.Title)
 		return err
 	case KindDDLConflict:
 		var out conflictOut

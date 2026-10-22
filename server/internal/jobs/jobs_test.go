@@ -40,7 +40,7 @@ func TestJobs(t *testing.T) {
 	exec(`INSERT INTO assignment_sources (assignment_id, original_assignment_id, author_id, kind) VALUES (1, 1, $1, 'first'), (2, 2, $1, 'first')`, uid)
 	exec(`UPDATE assignment_sources SET deleted_at = now(), deleted_reason = 'author' WHERE id = 2`)
 
-	// 积分：到期的在世来源 → settled；来源已删 → void；未到期保持 pending
+	// 贡献值：到期的在世来源 → settled；来源已删 → void；未到期保持 pending
 	exec(`INSERT INTO points_ledger (user_id, class_id, semester_id, source_id, reason, delta, status, settle_at, local_day) VALUES
 		($1, 1, 1, 1, 'first_post', 10, 'pending', $2, current_date),
 		($1, 1, 1, 2, 'first_post', 10, 'pending', $2, current_date),

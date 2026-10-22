@@ -74,7 +74,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/auth/recover", s.recover)
 		r.Get("/meta", s.meta)
 
-		// 电脑端 worker（WORKER_TOKEN）
+		// worker（WORKER_TOKEN）
 		r.Group(func(r chi.Router) {
 			r.Use(s.AI.RequireWorker)
 			r.Post("/worker/heartbeat", s.AI.HandleHeartbeat)
@@ -113,13 +113,19 @@ func (s *Server) Router() http.Handler {
 			r.Patch("/sources/{source_id}", s.patchSource)
 			r.Delete("/sources/{source_id}", s.deleteSource)
 			r.Post("/uploads", s.upload)
-			// WS2：社区与积分
+			// WS2：社区与贡献值
 			r.Post("/sources/{source_id}/thanks", s.thankSource)
 			r.Post("/sources/{source_id}/delete-votes", s.voteDelete)
 			r.Post("/merge-proposals", s.proposeMerge)
 			r.Post("/merge-proposals/{proposal_id}/accept", s.acceptMerge)
 			r.Post("/merge-proposals/{proposal_id}/votes", s.voteMerge)
 			r.Get("/me/points", s.myPoints)
+
+			// WS8（v2）：班级频道与举报
+			r.Get("/classes/{class_id}/messages", s.listMessages)
+			r.Post("/classes/{class_id}/messages", s.postMessage)
+			r.Delete("/messages/{message_id}", s.deleteMessage)
+			r.Post("/reports", s.createReport)
 
 			// WS2：管理员
 			r.Route("/admin", func(r chi.Router) {
@@ -130,6 +136,24 @@ func (s *Server) Router() http.Handler {
 				r.Post("/announcements", s.adminAnnounce)
 				r.Get("/class-merges", s.adminClassMerges)
 				r.Post("/class-merges/{merge_id}/revert", s.adminRevertClassMerge)
+
+				// WS8（v2）：举报、班级、删除、用户与处罚、贡献值、操作日志
+				r.Get("/reports", s.adminReports)
+				r.Post("/reports/{report_id}/resolve", s.adminResolveReport)
+				r.Get("/classes", s.adminClasses)
+				r.Post("/classes/merge", s.adminMergeClasses)
+				r.Patch("/classes/{class_id}", s.adminPatchClass)
+				r.Post("/classes/{class_id}/hide", s.adminHideClass(true))
+				r.Post("/classes/{class_id}/unhide", s.adminHideClass(false))
+				r.Delete("/sources/{source_id}", s.adminDeleteSource)
+				r.Delete("/messages/{message_id}", s.adminDeleteMessage)
+				r.Get("/users", s.adminUsers)
+				r.Get("/users/{user_id}", s.adminGetUser)
+				r.Patch("/users/{user_id}", s.adminPatchUser)
+				r.Post("/users/{user_id}/sanctions", s.adminAddSanction)
+				r.Post("/users/{user_id}/points", s.adminAdjustPoints)
+				r.Post("/sanctions/{sanction_id}/lift", s.adminLiftSanction)
+				r.Get("/actions", s.adminActions)
 			})
 
 			// WS3：AI 草稿
@@ -195,15 +219,21 @@ func (s *Server) requireUser(next http.Handler) http.Handler {
 			httpx.Fail(w, r, httpx.E(http.StatusUnauthorized, "token_expired", "登录已过期，请重新登录"))
 			return
 		}
+		// 每个请求都查一次 users（主键查询），封号（v2：users.disabled_at）立即生效，
+		// 未过期的 access token 也会被拦下，返回 403 account_disabled
 		var role string
 		var disabled *time.Time
 		err = s.DB.QueryRow(r.Context(), `SELECT role, disabled_at FROM users WHERE id = $1`, uid).Scan(&role, &disabled)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && disabled != nil) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Fail(w, r, httpx.ErrUnauthorized)
 			return
 		}
 		if err != nil {
 			httpx.Fail(w, r, err)
+			return
+		}
+		if disabled != nil {
+			httpx.Fail(w, r, errAccountDisabled)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), auth.User{ID: uid, Role: role})))

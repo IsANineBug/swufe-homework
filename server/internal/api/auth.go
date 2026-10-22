@@ -251,6 +251,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	failed := false
 	defer func() { done(failed) }()
+	// 有期限的封号到期则先解封（v2；定时任务也会每分钟清一次）
+	var disabledID int64
+	if s.DB.QueryRow(r.Context(), `SELECT id FROM users WHERE nickname = $1 AND disabled_at IS NOT NULL`, nick).Scan(&disabledID) == nil {
+		if err := store.ExpireDisables(r.Context(), s.DB, disabledID, s.Now()); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
 	var uid int64
 	var hash, role string
 	var disabled *time.Time
@@ -267,9 +275,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok, err := auth.VerifyPassword(in.Password, hash)
-	if err != nil || !ok || disabled != nil {
+	if err != nil || !ok {
 		failed = true
 		httpx.Fail(w, r, errBadCredentials)
+		return
+	}
+	if disabled != nil {
+		// 密码正确才告诉对方账号被停用（v2：403 account_disabled），不泄露昵称是否存在
+		httpx.Fail(w, r, errAccountDisabled)
 		return
 	}
 	t, err := s.issue(r.Context(), s.DB, uid, role)
@@ -304,6 +317,13 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		  AND u.id = t.user_id AND u.disabled_at IS NULL
 		RETURNING t.user_id, u.role`, auth.HashToken(in.RefreshToken)).Scan(&uid, &role)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// 封号时 refresh token 已全部作废；能对上某个账号的 token 时告诉 App 账号已停用（v2）
+		var disabled bool
+		if tx.QueryRow(ctx, `SELECT u.disabled_at IS NOT NULL FROM auth_tokens t JOIN users u ON u.id = t.user_id
+			WHERE t.token_hash = $1`, auth.HashToken(in.RefreshToken)).Scan(&disabled) == nil && disabled {
+			httpx.Fail(w, r, errAccountDisabled)
+			return
+		}
 		httpx.Fail(w, r, errBadRefresh)
 		return
 	}

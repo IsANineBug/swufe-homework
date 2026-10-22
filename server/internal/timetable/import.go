@@ -301,7 +301,11 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 				return nil, err
 			}
 			if len(left) > 0 {
+				// 整组跳过时，同组命中的其他（未退班的）同名班也放进 skipped（issue #8），
+				// App 才能提示「这门课没有自动加入」，用户可在搜索里手动加入
+				sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 				skippedIDs = append(skippedIDs, left...)
+				skippedIDs = append(skippedIDs, ids...)
 				continue
 			}
 		}
@@ -328,8 +332,17 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 			joinedIDs = append(joinedIDs, target)
 		}
 
-		// 补全该班缺的时段：与库里任何时段都不重叠的才插入
+		// 补全该班缺的时段：与库里任何时段都不重叠的才插入。
+		// 被管理员隐藏的班（v2）不参与归班；它占着的重叠时段让给本班（删掉隐藏班的这段时段），
+		// 否则 EXCLUDE 约束会让真实的班永远补不上这个时段。恢复隐藏后该班不再有这段时段。
 		for _, s := range g.slots {
+			if _, err := tx.Exec(ctx, `DELETE FROM class_slots cs USING classes c
+				WHERE c.id = cs.class_id AND c.hidden_at IS NOT NULL
+				  AND cs.semester_id = $1 AND cs.room = $2 AND cs.weekday = $3
+				  AND int4range(cs.start_period, cs.end_period, '[]') && int4range($4, $5, '[]')`,
+				sem.ID, s.Room, s.Weekday, s.Start, s.End); err != nil {
+				return nil, err
+			}
 			ov, err := overlapping(ctx, tx, sem.ID, s)
 			if err != nil {
 				return nil, err
@@ -433,13 +446,13 @@ func importOnce(ctx context.Context, pool *pgxpool.Pool, userID int64, slots []S
 	return res, nil
 }
 
-// overlapping 返回与该时段（教室+星期+节次）重叠的现存班级。
+// overlapping 返回与该时段（教室+星期+节次）重叠的现存班级（不含已合并走的、被管理员隐藏的班）。
 func overlapping(ctx context.Context, tx pgx.Tx, semID int32, s SlotInput) ([]existing, error) {
 	rows, err := tx.Query(ctx, `SELECT DISTINCT c.id, c.name, c.name_truncated
 		FROM class_slots cs JOIN classes c ON c.id = cs.class_id
 		WHERE cs.semester_id = $1 AND cs.room = $2 AND cs.weekday = $3
 		  AND int4range(cs.start_period, cs.end_period, '[]') && int4range($4, $5, '[]')
-		  AND c.merged_into IS NULL
+		  AND c.merged_into IS NULL AND c.hidden_at IS NULL
 		ORDER BY c.id`, semID, s.Room, s.Weekday, s.Start, s.End)
 	if err != nil {
 		return nil, err
@@ -456,31 +469,17 @@ func overlapping(ctx context.Context, tx pgx.Tx, semID int32, s SlotInput) ([]ex
 	return out, rows.Err()
 }
 
-// mergeClasses 把 ids 中的班并到最早创建的那个（成员、时段、作业、积分流水、禁发记录），
+// mergeClasses 把 ids 中的班并到最早创建的那个（成员、时段、作业、贡献值流水、禁发记录），
 // 旧班 merged_into 指向保留班。只有一个 id 时直接返回。
 // 每次合并先在 class_merges 记下搬动的行和合并前状态，供管理员撤销（issue #4 裁决 10）。
 func mergeClasses(ctx context.Context, tx pgx.Tx, ids []int64, userID int64, res *Result) (int64, error) {
-	rows, err := tx.Query(ctx, `SELECT id, name, name_truncated FROM classes WHERE id = ANY($1)
+	rows, err := tx.Query(ctx, `SELECT id FROM classes WHERE id = ANY($1)
 		ORDER BY created_at, id FOR UPDATE`, ids)
 	if err != nil {
 		return 0, err
 	}
-	type cls struct {
-		id    int64
-		name  string
-		trunc bool
-	}
-	var cs []cls
-	for rows.Next() {
-		var c cls
-		if err := rows.Scan(&c.id, &c.name, &c.trunc); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		cs = append(cs, c)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	cs, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
 		return 0, err
 	}
 	if len(cs) == 0 {
@@ -488,43 +487,65 @@ func mergeClasses(ctx context.Context, tx pgx.Tx, ids []int64, userID int64, res
 	}
 	keep := cs[0]
 	for _, from := range cs[1:] {
-		if _, err := tx.Exec(ctx, mergeSnapshotSQL, from.id, keep.id, userID); err != nil {
-			return 0, fmt.Errorf("merge snapshot %d into %d: %w", from.id, keep.id, err)
-		}
-		stmts := []string{
-			`UPDATE class_slots SET class_id = $2 WHERE class_id = $1`,
-			// 成员：任一班在班即在班
-			`INSERT INTO class_members (class_id, user_id, joined_at, left_at)
-			 SELECT $2, user_id, joined_at, left_at FROM class_members WHERE class_id = $1
-			 ON CONFLICT (class_id, user_id) DO UPDATE SET
-			   joined_at = LEAST(class_members.joined_at, EXCLUDED.joined_at),
-			   left_at = CASE WHEN class_members.left_at IS NULL OR EXCLUDED.left_at IS NULL
-			                  THEN NULL ELSE GREATEST(class_members.left_at, EXCLUDED.left_at) END`,
-			`UPDATE class_members SET left_at = now() WHERE class_id = $1 AND left_at IS NULL AND $2::bigint IS NOT NULL`,
-			`UPDATE assignments SET class_id = $2 WHERE class_id = $1`,
-			`UPDATE points_ledger SET class_id = $2 WHERE class_id = $1`,
-			`UPDATE post_bans SET class_id = $2 WHERE class_id = $1`,
-			`UPDATE classes SET merged_into = $2 WHERE merged_into = $1`,
-			`UPDATE classes SET merged_into = $2 WHERE id = $1`,
-		}
-		for _, q := range stmts {
-			if _, err := tx.Exec(ctx, q, from.id, keep.id); err != nil {
-				return 0, fmt.Errorf("merge %d into %d: %w", from.id, keep.id, err)
-			}
-		}
-		if keep.trunc && !from.trunc {
-			if _, err := tx.Exec(ctx, `UPDATE classes SET name = $2, name_truncated = false WHERE id = $1`, keep.id, from.name); err != nil {
-				return 0, err
-			}
-			keep.name, keep.trunc = from.name, false
-		}
-		if _, err := tx.Exec(ctx, `UPDATE classes SET teacher = (SELECT teacher FROM classes WHERE id = $1)
-			WHERE id = $2 AND teacher IS NULL`, from.id, keep.id); err != nil {
+		if _, err := MergeInto(ctx, tx, from, keep, &userID); err != nil {
 			return 0, err
 		}
-		res.Merged = append(res.Merged, Merged{From: from.id, Into: keep.id})
+		res.Merged = append(res.Merged, Merged{From: from, Into: keep})
 	}
-	return keep.id, nil
+	return keep, nil
+}
+
+// MergeInto 把班 from 并入 into：先写 class_merges 快照（可由 /admin/class-merges/{id}/revert 撤销），
+// 再搬成员、时段、作业、贡献值流水、禁发记录与子合并班，from.merged_into = into。
+// 自动合并（导入课表）与管理员手动合并（v2）共用。调用方须已锁住两个班并校验同学期、未合并。
+// 返回 class_merges.id。triggeredBy 为触发合并的用户（管理员手动合并时为管理员）。
+func MergeInto(ctx context.Context, tx pgx.Tx, from, into int64, triggeredBy *int64) (int64, error) {
+	var mergeID int64
+	if err := tx.QueryRow(ctx, mergeSnapshotSQL, from, into, triggeredBy).Scan(&mergeID); err != nil {
+		return 0, fmt.Errorf("merge snapshot %d into %d: %w", from, into, err)
+	}
+	stmts := []string{
+		`UPDATE class_slots SET class_id = $2 WHERE class_id = $1`,
+		// 成员：任一班在班即在班
+		`INSERT INTO class_members (class_id, user_id, joined_at, left_at)
+		 SELECT $2, user_id, joined_at, left_at FROM class_members WHERE class_id = $1
+		 ON CONFLICT (class_id, user_id) DO UPDATE SET
+		   joined_at = LEAST(class_members.joined_at, EXCLUDED.joined_at),
+		   left_at = CASE WHEN class_members.left_at IS NULL OR EXCLUDED.left_at IS NULL
+		                  THEN NULL ELSE GREATEST(class_members.left_at, EXCLUDED.left_at) END`,
+		`UPDATE class_members SET left_at = now() WHERE class_id = $1 AND left_at IS NULL AND $2::bigint IS NOT NULL`,
+		// 刷新 updated_at（issue #8）：/sync 才会下发作业的新班级 id 与班名
+		`UPDATE assignments SET class_id = $2, updated_at = now() WHERE class_id = $1`,
+		`UPDATE points_ledger SET class_id = $2 WHERE class_id = $1`,
+		`UPDATE post_bans SET class_id = $2 WHERE class_id = $1`,
+		`UPDATE classes SET merged_into = $2 WHERE merged_into = $1`,
+		`UPDATE classes SET merged_into = $2 WHERE id = $1`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(ctx, q, from, into); err != nil {
+			return 0, fmt.Errorf("merge %d into %d: %w", from, into, err)
+		}
+	}
+	var fromName string
+	var fromTrunc, intoTrunc bool
+	if err := tx.QueryRow(ctx, `SELECT f.name, f.name_truncated, i.name_truncated FROM classes f, classes i
+		WHERE f.id = $1 AND i.id = $2`, from, into).Scan(&fromName, &fromTrunc, &intoTrunc); err != nil {
+		return 0, err
+	}
+	if intoTrunc && !fromTrunc {
+		// 课名补全：保留班原有作业的班名也变了，一并刷新供 /sync 下发
+		if _, err := tx.Exec(ctx, `UPDATE classes SET name = $2, name_truncated = false WHERE id = $1`, into, fromName); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE assignments SET updated_at = now() WHERE class_id = $1`, into); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE classes SET teacher = (SELECT teacher FROM classes WHERE id = $1)
+		WHERE id = $2 AND teacher IS NULL`, from, into); err != nil {
+		return 0, err
+	}
+	return mergeID, nil
 }
 
 func uniq(ids []int64) []int64 {
@@ -552,4 +573,5 @@ SELECT $1, $2, $3, jsonb_build_object(
   'into_members', coalesce((SELECT jsonb_agg(jsonb_build_object('user_id', user_id, 'joined_at', joined_at, 'left_at', left_at)
                    ORDER BY user_id) FROM class_members WHERE class_id = $2), '[]'),
   'into_name', c.name, 'into_name_truncated', c.name_truncated, 'into_teacher', c.teacher)
-FROM classes c WHERE c.id = $2`
+FROM classes c WHERE c.id = $2
+RETURNING id`
