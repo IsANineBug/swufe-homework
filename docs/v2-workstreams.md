@@ -12,7 +12,19 @@
 | WS11 | Android 功能：首页、作业编辑、频道、举报、管理、issue #8 Android 项 | `/android` | `ws11-android-features` | WS10 第一个 PR 合并后开工；接口按 api.yaml 先写，WS8 合并后联调 |
 | WS7 | 审计（只审不写） | — | — | 每个 PR |
 
-合并顺序建议：WS10 第一个 PR（视觉规范）→ WS8、WS9 → WS10 第二个 PR → WS11 → 打 `v0.0.1-rc2`。
+### 开工顺序与调度（由 WS7 安排）
+WS7 既审计也排班。**调度板是 issue「v2 调度板」**（标题以此开头），WS7 每 30 分钟更新一次，写明每条线现在该做什么、能不能开工、等谁。各开发 Hark 每 30 分钟先看调度板，再看自己 PR 的 review，按调度板执行，不要抢跑。
+
+| 阶段 | 开工条件 | 谁做什么 |
+|---|---|---|
+| 1 | 立即 | WS8、WS9、WS10 ① 同时开工。PR #9 合并前从分支 `v2-contract` 拉分支（PR 的 base 仍是 `main`），#9 合并后 rebase 到 main。 |
+| 2 | WS10 ① 「通过」并合并 | WS11 开工（WS8 未合并前先用假数据）；WS10 继续做 ②。 |
+| 3 | 各自「通过」 | 合并顺序：WS9（随时）→ WS8 → WS10 ② → WS11。后合并的先 rebase 到最新 main 再请求复审。 |
+| 4 | 四条线全部合并 | 作者发 `v0.0.1-rc2` 并重测。 |
+
+- WS11 在 WS10 ② 合并前不要改 `PublishViewModel.kt` 里调用 parse_assignment 的那一处。
+- WS8 合并后，WS11 把假数据换成真接口联调；接口和 api.yaml 对不上时在 PR 里 @ WS8，不要自己改契约。
+- 卡住超过 1 小时（等裁决、等别的线）就在调度板留言「[WS编号] 卡住：原因」，WS7 会转给作者。
 
 **Android 两条线的文件归属**（避免冲突）：
 - WS10 负责：`ui/theme/`、`ui/common/`、`ui/timetable/`、`ui/auth/`、`ui/me/`（不含管理入口里的页面）、`ui/main/MainScreen.kt`、`ui/homework/ReminderGuideScreen.kt`、`ui/homework/PointsScreens.kt`、`reminder/`、`data/repo/AiJobTracker.kt`（新）、`assets/points-rules.md`。
@@ -29,7 +41,7 @@
 ## WS8 后端 v2
 ```
 你负责 swufe-homework 的 /server v2 改动。仓库 IsANineBug/swufe-homework，从 main 拉分支 ws8-server-v2，PR 标题前缀 [WS8]。
-先读 docs/requirements.md（重点第十三节）、docs/api.yaml（所有标 v2 的路径和字段）、server/db/schema.sql（标 v2 的部分）、docs/points-rules.md、issue #8。
+开工前和之后每 30 分钟先看 issue「v2 调度板」。先读 docs/requirements.md（重点第十三节）、docs/api.yaml（所有标 v2 的路径和字段）、server/db/schema.sql（标 v2 的部分）、docs/points-rules.md、issue #8。
 
 1. 迁移 0005_v2（up/down）：classes.hidden_at；points_ledger reason 加 admin_adjust、加 note 列；
    新表 class_messages、reports、user_sanctions、admin_actions，以及 schema.sql 里写的索引。schema.sql 已是目标状态，迁移要和它一致。
