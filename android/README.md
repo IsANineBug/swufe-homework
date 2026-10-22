@@ -9,6 +9,8 @@ app/src/main/java/com/swufe/homework/
   data/local    DataStore（token、设置）、Room（课表缓存）
   data/repo     Auth / Account / Timetable / Update 仓库
   di            Hilt 模块
+  ui/theme      视觉规范：颜色（含语义色、课表色）、字号、圆角、间距（见「视觉规范」）
+  ui/common     通用组件：空/加载/出错状态、状态条、分组标题、确认弹窗
   ui/auth       登录、注册（校园网检测 + 邀请码）、恢复码展示、找回
   ui/timetable  课表网格、截图导入与确认、手动添加、班级页外壳
   ui/me         我的、设置、邀请码
@@ -37,6 +39,66 @@ cd android
 - **release fail-closed**：缺 pin、地址仍为默认 `127.0.0.1`、或缺签名配置时 `assembleRelease` 直接失败；运行时 release 下 pin 为空也会拒绝建立连接。
 - debug 可以不配：pin 为空时退回系统 CA（只用于本地对接有正规证书的测试服务器）。
 - 有 pin 时只接受叶子证书公钥匹配的证书，主机名用 OkHttp 默认校验（证书带 IP SAN）。
+
+## 视觉规范
+主题入口 `ui/theme/SwufeTheme`（不用动态取色）。**页面里不要再写 `Color(0x…)`、裸 `dp` 间距或自定义字号**，一律从下面取。
+
+![浅色](screenshots/design-light.png) ![深色](screenshots/design-dark.png)
+
+截图由 `DesignScreenshotTest` 渲染 debug 里的 `DesignShowcase`（也可在 Android Studio 里看它的 @Preview）：
+`./gradlew testDebugUnitTest --tests '*DesignScreenshotTest' -Pscreenshots=screenshots`，产物在 `app/screenshots/`，复制到 `android/screenshots/`。
+Robolectric 原生绘图只支持 x86_64 Linux / macOS / Windows；不传 `-Pscreenshots` 时这个测试被排除、不启动 Robolectric，CI 不受影响。
+
+### 颜色角色（`MaterialTheme.colorScheme`）
+以西财红 `#8B1A1A` 为浅色 primary，深色 primary 为 `#FFB4AA`；secondary 是偏灰暖红，tertiary 是金色。对比度由 `ThemeTest` 校验（正文 ≥ 7:1，其余文字 ≥ 4.5:1，outline ≥ 3:1，深浅模式都查）。
+
+| 角色 | 用在哪 |
+|---|---|
+| `primary` / `onPrimary` | 主按钮、选中态、页面里最重要的一个操作；分组标题文字 |
+| `primaryContainer` | 选中的筛选标签、强调块底色 |
+| `secondaryContainer` | 次要强调、进行中状态条 |
+| `tertiary*` | 少量点缀（如课代表、徽章），不要大面积用 |
+| `surface` / `onSurface` | 页面底色与正文 |
+| `surfaceContainerLow` → `Highest` | 卡片（Low）、输入区与骨架（Highest），层级越高越深 |
+| `onSurfaceVariant` | 辅助文字（时间、来源、说明） |
+| `outline` / `outlineVariant` | 边框、分割线；**不要**再拿 outline 当文字色写大段说明 |
+| `error*` | 出错、删除等破坏性操作 |
+
+语义色 `MaterialTheme.semantic`（`import com.swufe.homework.ui.theme.semantic`）：
+
+| 语义 | 用在哪 | 文字/图标 | 标签底 + 字 |
+|---|---|---|---|
+| Urgent | 24 小时内截止、DDL 不一致 | `urgent` | `urgentContainer` + `onUrgentContainer` |
+| Warning | 待确认（`ddl_uncertain`、识别拿不准） | `warning` | `warningContainer` + `onWarningContainer` |
+| Success | 已完成、已开启、加分 | `success` | `successContainer` + `onSuccessContainer` |
+| 核对高亮 | 需要用户核对的输入框/格子底色 | — | `ReviewHighlight`（字仍是 `onSurface`） |
+
+课表色块：`CourseColors[Math.floorMod(classId, CourseColors.size)]`，块上文字 `OnCourseColor`（白）。深浅模式各一套，都对白字 ≥ 4.5:1。
+
+### 字号（`MaterialTheme.typography`，任何字 ≥ 12sp）
+| 级别 | 槽位 | 用在哪 |
+|---|---|---|
+| 标题 | `headlineSmall` 22 / `titleLarge` 20 / `titleMedium` 17 / `titleSmall` 15 | 页面大标题 / 顶栏 / 卡片标题 / 分组标题 |
+| 正文 | `bodyLarge` 16 / `bodyMedium` 15 | 长段说明 / 列表与卡片正文 |
+| 辅助 | `bodySmall` 13 / `labelLarge` 15 / `labelMedium` 13 / `labelSmall` 12 | 时间、来源、提示 / 按钮 / 小标题 / 标签 |
+
+### 圆角与间距
+- 圆角 `Corners`：卡片 `Card` 16dp、按钮 `Button` 12dp、标签 `Tag` 8dp、大面板 `Sheet` 24dp。`MaterialTheme.shapes` 已映射（Card/AlertDialog/TextField 自动生效）；
+  **Material 3 按钮默认是胶囊形，`Button`/`OutlinedButton` 要传 `shape = Corners.Button`**。
+- 间距 `Spacing`：`xs` 4、`sm` 8、`md` 12、`lg` 16、`xl` 24。页面左右边距 `lg`，表单页 `xl`；卡片内边距 `lg`（紧凑卡片 `md`）；列表项之间 `sm`～`md`；大区块之间 `xl`。
+
+### 通用组件（`ui/common/`）
+| 组件 | 什么时候用 |
+|---|---|
+| `LoadingState` | 首次加载、页面还没有内容时。默认居中进度；列表页传 `skeleton = true` 显示骨架行。已有内容再刷新用下拉刷新，不要整页换成它 |
+| `EmptyState` | 加载成功但没有数据（或筛选后为空）：图标 + 一句话 + 可选按钮（如「发布作业」）。不要只放一行灰字 |
+| `ErrorState` | 加载失败且没有可显示的旧内容：写清原因 + 「重试」。有旧内容时用 Snackbar 提示，保留内容 |
+| `StatusBanner` | 顶部状态条，跨页面的后台任务（识图）：`Progress` 进行中、`Success` 完成 +「去确认 ›」、`Error` 失败 + 补救操作 |
+| `SectionHeader` | 列表里的分组小标题（今天 / 本周 / 设置分组），可带右侧「全部」等操作 |
+| `ConfirmDialog` | 需要二次确认的操作；破坏性操作 `destructive = true`；要冷静期的（删除投票）传 `countdownSeconds`，按钮显示「确认删除（3）」 |
+| `BackTopBar`、`FormColumn`、`LoadingButton`、`PasswordField`、`ErrorText` | 原有组件（`FormColumn`、`LoadingButton` 已改用 `Spacing` / `Corners`；`CenterLoading` 现等同 `LoadingState()`） |
+
+在 `LazyColumn` 里放空/错状态时用 `item { EmptyState(..., fill = false) }`。
 
 ## 已实现（WS4）
 - 注册：先 `/auth/campus-check`，非校园网要求邀请码；成功后强制展示恢复码，勾选「我已妥善保存」才能继续，屏蔽返回键。

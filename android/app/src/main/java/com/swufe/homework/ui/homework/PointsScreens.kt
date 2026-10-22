@@ -24,7 +24,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -45,6 +44,7 @@ import com.swufe.homework.util.RulesMarkdown
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.swufe.homework.ui.theme.semantic
 
 @HiltViewModel
 class PointsViewModel @Inject constructor(private val repo: AssignmentRepository) : ViewModel() {
@@ -124,7 +124,7 @@ fun MyPointsScreen(onBack: () -> Unit, onRules: () -> Unit, vm: PointsViewModel 
                             color = when {
                                 e.status == "void" -> MaterialTheme.colorScheme.outline
                                 e.delta < 0 -> MaterialTheme.colorScheme.error
-                                else -> Color(0xFF2E7D32)
+                                else -> MaterialTheme.semantic.success
                             },
                         )
                     },

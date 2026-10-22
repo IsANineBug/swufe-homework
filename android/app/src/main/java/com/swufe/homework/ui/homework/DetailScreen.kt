@@ -50,7 +50,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -74,9 +73,10 @@ import com.swufe.homework.data.api.Assignment
 import com.swufe.homework.data.api.Attachment
 import com.swufe.homework.data.api.Source
 import com.swufe.homework.ui.common.BackTopBar
+import com.swufe.homework.ui.common.ConfirmDialog
 import com.swufe.homework.ui.common.ErrorText
 import com.swufe.homework.util.Ddl
-import kotlinx.coroutines.delay
+import com.swufe.homework.ui.theme.semantic
 
 /** 删除投票弹窗文案（requirements §七、workstreams WS5 第 4 条），原样展示。 */
 const val DELETE_VOTE_WARNING = "此功能用于删除错误或虚假的内容。达到人数后将删除该内容，并扣除发布者积分。请确认内容有误后再使用此功能。"
@@ -215,7 +215,7 @@ private fun Header(a: Assignment, onOpenClass: (Int) -> Unit) {
             Text("补充内容里的 DDL 和这里不一致，请核对老师的通知。", color = ConflictRed, style = MaterialTheme.typography.bodySmall)
         }
         if (a.ddlUncertain) {
-            Text("DDL 待确认：发布者或识别结果拿不准，请以老师通知为准。", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7A5B00))
+            Text("DDL 待确认：发布者或识别结果拿不准，请以老师通知为准。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.semantic.warning)
         }
         Text(
             listOfNotNull(
@@ -307,24 +307,18 @@ private fun SourceCard(
     }
 }
 
-/** 红色警示 → 固定文案 → 确认按钮倒数 3 秒后才能点。 */
+/** 红色警示 → 固定文案 → 确认按钮倒数 3 秒后才能点（通用 ConfirmDialog 的倒数变体）。 */
 @Composable
 fun DeleteVoteDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    var left by remember { mutableIntStateOf(DELETE_CONFIRM_SECONDS) }
-    LaunchedEffect(Unit) { while (left > 0) { delay(1000); left-- } }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Filled.Report, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-        title = { Text("投票删除", color = MaterialTheme.colorScheme.error) },
-        text = { Text(DELETE_VOTE_WARNING) },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                enabled = left == 0,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            ) { Text(if (left > 0) "确认删除（$left）" else "确认删除") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    ConfirmDialog(
+        title = "投票删除",
+        text = DELETE_VOTE_WARNING,
+        confirmLabel = "确认删除",
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+        destructive = true,
+        countdownSeconds = DELETE_CONFIRM_SECONDS,
+        icon = Icons.Filled.Report,
     )
 }
 

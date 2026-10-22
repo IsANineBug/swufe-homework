@@ -70,7 +70,17 @@ android {
         abortOnError = true
         warningsAsErrors = false
     }
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+        // 视觉规范截图：./gradlew testDebugUnitTest --tests '*DesignScreenshotTest' -Pscreenshots=<输出目录>
+        // 不传时不跑截图测试（Robolectric 原生绘图只支持 x86_64 Linux / macOS / Windows）。
+        unitTests.all { test ->
+            val dir = project.findProperty("screenshots") as String?
+            if (dir != null) test.systemProperty("swufe.screenshots", file(dir).absolutePath)
+            else test.exclude("**/DesignScreenshotTest*")
+        }
+    }
 }
 
 // release 必须 fail-closed：缺 pin、地址仍是默认值、或缺签名配置时直接构建失败，
@@ -128,4 +138,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }
