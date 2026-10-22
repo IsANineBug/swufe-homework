@@ -16,3 +16,6 @@
 | 2026-10-16 | #6 [WS5] 复审 0101e88 | 需修改 | 上轮 4 项已修；新引入：DetailViewModel.kt:49 curId 声明在 init{load()} 之后，load 时为 0，所有详情页显示「已被删除或合并」，onSuccess 未重置 gone |
 | 2026-10-16 | #7 [WS3] 复审 ecf6563（变基到 95a81c3） | 通过 | 迁移改 0004、共用 WS2 files.Signer、写回刷新 updated_at 并由 WS2 写路径触发，测试全过；非阻塞：jobs.go:539 DDL 毫秒比较、改标题未清 reminder_text |
 | 2026-10-16 | #6 [WS5] 复审 b689e6d | 通过 | curId 移到 init 之前、成功时重置 gone，合并后立即取消旧 id 提醒；非阻塞：清空 stated_ddl 不下发、isMine 按昵称 |
+| 2026-10-23 | #11 [WS9] | 需修改 | 第 8 条未做：worker/README.md 仍写电脑开机自启（:55-121）与 12:00–24:00（:123-130），缺服务器 systemd/docker 运行、崩溃重启、≤64MB、服务器代理；:130「电脑未在线」；.env.example:48；模型 id 未经 /models 核对（作者确认） |
+| 2026-10-23 | #13 [WS8] | 通过 | 测试全过（PG17）；隐藏班导入时让出时段与 api.yaml「数据全部保留」有出入，待作者裁决；须在 #9 后 rebase |
+| 2026-10-23 | #14 [WS10] ① | 通过 | 主题/组件齐全，越界改动已说明；未本地编译（无 Android SDK）；建议 ConfirmDialog 加原因输入槽 |
