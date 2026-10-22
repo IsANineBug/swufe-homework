@@ -19,12 +19,13 @@ security:
 
 tags:
   - {name: auth, description: 注册、登录、找回}
-  - {name: me, description: 我的信息、邀请、积分}
+  - {name: me, description: 我的信息、邀请、贡献值}
   - {name: timetable, description: 课表导入与班级}
   - {name: assignments, description: 作业、来源、完成状态}
   - {name: moderation, description: 合并、删除投票、谢谢}
   - {name: ai, description: AI 草稿（电脑在线时可用）}
   - {name: worker, description: 电脑端 worker 专用}
+  - {name: chat, description: 班级频道与举报（v2）}
   - {name: admin, description: 管理员}
 
 paths:
@@ -231,7 +232,7 @@ paths:
   /me/points:
     get:
       tags: [me]
-      summary: 积分明细与汇总
+      summary: 贡献值明细与汇总
       parameters:
         - {name: cursor, in: query, schema: {type: string}}
       responses:
@@ -402,7 +403,7 @@ paths:
         必须是班级成员（403 not_member）；禁发期内 403 post_banned；当天在该班已发 5 条（首发与补充合计，
         按 Asia/Shanghai 日期，被删除的不计）429 daily_limit。缺 ddl → 400 ddl_required（有图片时尤其必须）。
         attachment_ids 必须是本人上传、尚未使用的附件，否则 400 bad_attachment。班级不属于当前学期 409 class_archived。
-        首发积分 +10 写 pending，24 小时后结算。发布前 App 应先调 /candidates。
+        首发贡献值 +10 写 pending，24 小时后结算。发布前 App 应先调 /candidates。
       parameters: [{$ref: '#/components/parameters/ClassId'}]
       requestBody:
         required: true
@@ -446,7 +447,7 @@ paths:
     get:
       tags: [moderation]
       description: |
-        班级成员或管理员可看。周榜 = 本周一 00:00（Asia/Shanghai）起记入的已结算积分；学期榜 = 本班全部已结算积分（班级只属于一个学期）。
+        班级成员或管理员可看。周榜 = 本周一 00:00（Asia/Shanghai）起记入的已结算贡献值；学期榜 = 本班全部已结算贡献值（班级只属于一个学期）。
         rank 并列同名次；返回前 100 名，本人不在前 100 时额外附上本人一行。课代表 = 学期榜第一（> 0 分），同分取先达到者。
       parameters:
         - {$ref: '#/components/parameters/ClassId'}
@@ -542,7 +543,7 @@ paths:
       tags: [assignments]
       summary: 给已有作业补充内容。stated_ddl 与作业 DDL 不一致时作业标红
       description: |
-        须为班级成员；正文和附件不能都为空（400 bad_request）；禁发、每日 5 条同首发。补充积分 +3 写 pending，24 小时后结算。
+        须为班级成员；正文和附件不能都为空（400 bad_request）；禁发、每日 5 条同首发。补充贡献值 +3 写 pending，24 小时后结算。
         给已合并作业补充时自动加到合并目标上。
       parameters: [{$ref: '#/components/parameters/AssignmentId'}]
       requestBody:
@@ -585,7 +586,7 @@ paths:
         "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Source'}}}}
     delete:
       tags: [assignments]
-      summary: 作者删除自己的来源（不扣分，但该来源积分作废）
+      summary: 作者删除自己的来源（不扣分，但该来源贡献值作废）
       description: 幂等。作业没有剩余来源时随之删除（出现在 /sync 的 removed_ids）。作者删除的内容管理员不恢复。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
       responses:
@@ -661,7 +662,7 @@ paths:
       summary: 投票删除错误或虚假内容
       description: |
         门槛 = clamp(ceil(班级成员数 × 10%), 3, 6)。达到门槛即软删除，
-        收回积分并扣 10 分；30 天内第 3 次被删 → 该班禁发 7 天；
+        收回贡献值并扣 10 分；30 天内第 3 次被删 → 该班禁发 7 天；
         作者为邀请注册时通知其直接邀请人。
         须为班级成员；投自己的内容 409 self_vote（请直接删除），重复 409 already_voted。
         作者收到 content_deleted 通知，禁发时收到 ban 通知，邀请人收到 invitee_violation 通知。
@@ -721,7 +722,7 @@ paths:
       summary: 班级成员赞同；满 3 人执行
       description: |
         执行：搬来源（不删内容）、from 标记 merged_into、完成状态并集、
-        DDL 不一致则 to 标红、积分按 points-rules 调整、推送 sync 变更。
+        DDL 不一致则 to 标红、贡献值按 points-rules 调整、推送 sync 变更。
         from 的首发者投赞同票等同 accept。重复投票 409 already_voted；其余错误同 accept。
         执行后同一 from 的其他进行中提议改为 expired，from 的首发者收到 merge_applied 通知。
       parameters: [{$ref: '#/components/parameters/ProposalId'}]
@@ -840,9 +841,9 @@ paths:
   /admin/sources/{source_id}/restore:
     post:
       tags: [admin]
-      summary: 恢复误删内容，返还积分，可选解除禁发
+      summary: 恢复误删内容，返还贡献值，可选解除禁发
       description: |
-        只恢复被投票删除的内容（作者自删 409 not_restorable），幂等。清空该来源的删除票；作废的积分恢复
+        恢复被投票删除或（v2 起）管理员删除的内容（作者自删 409 not_restorable），幂等。清空该来源的删除票；作废的贡献值恢复
         （未到 24 小时的回到 pending），扣的 10 分写 restore_refund 返还；lift_ban 解除作者在该班的禁发。作者收到 content_restored 通知。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
       requestBody:
@@ -856,7 +857,7 @@ paths:
       tags: [admin]
       summary: 撤销合并（按 original_assignment_id 搬回来源）
       description: |
-        按执行时记下的快照（merge_proposals.snapshot）还原：搬回来源、from 首发来源改回 first、首发积分恢复、
+        按执行时记下的快照（merge_proposals.snapshot）还原：搬回来源、from 首发来源改回 first、首发贡献值恢复、
         合并时新记的补充分作废、合并时补上的完成状态去掉、两边重算标红。只能撤销 applied 的提议（否则 409 merge_closed）；
         目标作业之后又被合并走时 409 merge_chain，先撤销后一次。
       parameters: [{$ref: '#/components/parameters/ProposalId'}]
@@ -892,7 +893,7 @@ paths:
       tags: [admin]
       summary: 撤销班级自动合并
       description: |
-        按 class_merges.snapshot 把时段、作业、积分流水、禁发记录、子合并班搬回 from，from 成员按快照重建，
+        按 class_merges.snapshot 把时段、作业、贡献值流水、禁发记录、子合并班搬回 from，from 成员按快照重建，
         into 中因合并新增的成员移除、原成员恢复合并前状态，into 课名/教师恢复；两个班的作业刷新 updated_at 供 /sync。
         已撤销 409 merge_closed；into 之后又被合并走 409 merge_chain。
       parameters:
@@ -933,6 +934,337 @@ paths:
         "201": {description: ok, content: {application/json: {schema: {type: object, properties: {id: {type: integer}}}}}}
         "400": {$ref: '#/components/responses/Error'}
 
+  # ---------------- v2（WS8）：班级频道、举报、管理员 ----------------
+  /classes/{class_id}/messages:
+    get:
+      tags: [chat]
+      summary: 班级频道消息（App 打开频道时每 10–15 秒用 after_id 拉一次新消息，离开即停）
+      description: |
+        仅班级成员可看（非成员 403 not_member；管理员也不例外，管理员只能通过举报看到被举报的消息）。
+        after_id 给出时返回 id > after_id 的最多 limit 条（升序）；否则返回最新 limit 条（升序），before_id 用于往上翻。
+        已删除的消息不返回（作者删除、管理员删除都一样）。只保留最近 30 天且每班最近 500 条。
+      parameters:
+        - {$ref: '#/components/parameters/ClassId'}
+        - {name: after_id, in: query, schema: {type: integer}}
+        - {name: before_id, in: query, schema: {type: integer}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 50}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Message'}}
+                  muted_until: {type: [string, "null"], format: date-time, description: 我被禁言到何时；永久禁言不存在（禁言必须有期限）}
+        "403": {$ref: '#/components/responses/Error'}
+    post:
+      tags: [chat]
+      summary: 发一条消息（纯文字 1–300 字）
+      description: |
+        须为班级成员；被禁言 403 muted；封号的账号无法登录。去掉首尾空白后为空或超过 300 字 400 bad_body。
+        限频：每人每 10 秒 1 条、每小时 30 条（所有班合计），超出 429 chat_rate_limited，响应头 Retry-After 给出秒数。
+        班级已隐藏或学期已归档 409 class_archived。
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [body], properties: {body: {type: string, maxLength: 300}}}
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Message'}}}}
+        "400": {$ref: '#/components/responses/Error'}
+        "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
+
+  /messages/{message_id}:
+    delete:
+      tags: [chat]
+      summary: 作者删除自己的消息（幂等）；非作者 403 forbidden
+      parameters: [{$ref: '#/components/parameters/MessageId'}]
+      responses:
+        "204": {description: ok}
+        "403": {$ref: '#/components/responses/Error'}
+
+  /reports:
+    post:
+      tags: [chat]
+      summary: 举报（作业来源、频道消息、班级、用户）
+      description: |
+        reason 1–200 字。须能看到该对象（来源/消息/班级须为班级成员；用户须与你同班）。
+        同一人对同一对象已有未处理举报时 409 already_reported。每人每天最多 20 条，超出 429 rate_limited。
+        举报人身份只有管理员可见，被举报人看不到。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_kind, target_id, reason]
+              properties:
+                target_kind: {type: string, enum: [source, message, class, user]}
+                target_id: {type: integer}
+                reason: {type: string, maxLength: 200}
+      responses:
+        "201": {description: ok}
+        "400": {$ref: '#/components/responses/Error'}
+        "403": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
+
+  /admin/reports:
+    get:
+      tags: [admin]
+      summary: 举报列表（默认未处理，按时间倒序，最多 200 条）
+      description: |
+        同一对象的多条举报合并为一行（reporters 列出举报人昵称和理由）。target 只给处理所需的公开内容：
+        来源 → 正文、附件缩略图、作者昵称、班级名；消息 → 正文、作者昵称、班级名，以及前后各 5 条消息作上下文；
+        班级 → 班名、成员数、作业数、创建者昵称；用户 → AdminUser。
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [open, handled], default: open}}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AdminReport'}}}}}
+
+  /admin/reports/{report_id}/resolve:
+    post:
+      tags: [admin]
+      summary: 处理举报（同一对象的所有未处理举报一起关掉）
+      description: removed = 已处置（删除/隐藏/处罚由各自接口完成，这里只记结果）；dismissed = 驳回。已处理 409 report_closed。
+      parameters:
+        - {name: report_id, in: path, required: true, schema: {type: integer}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [resolution], properties: {resolution: {type: string, enum: [removed, dismissed]}}}
+      responses:
+        "204": {description: ok}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /admin/classes:
+    get:
+      tags: [admin]
+      summary: 班级列表，用于清理垃圾班级
+      description: |
+        q 按班名模糊搜；filter=suspicious 只列「成员 ≤1 且 0 份作业」或班名含非常见字符的班；include_hidden 默认 false。
+        按 created_at 倒序分页，每页 50。
+      parameters:
+        - {name: q, in: query, schema: {type: string}}
+        - {name: filter, in: query, schema: {type: string, enum: [all, suspicious], default: all}}
+        - {name: include_hidden, in: query, schema: {type: boolean, default: false}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AdminClass'}}}}}
+
+  /admin/classes/{class_id}:
+    patch:
+      tags: [admin]
+      summary: 改班名/教师（如修正识别错误的课名）
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string, minLength: 1, maxLength: 60}
+                teacher: {type: [string, "null"]}
+                reason: {type: string, maxLength: 200}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AdminClass'}}}}
+
+  /admin/classes/{class_id}/hide:
+    post:
+      tags: [admin]
+      summary: 隐藏垃圾班级（软删除，可恢复）
+      description: |
+        隐藏后：成员的课表和 /me/classes 不再出现它，/classes/search 搜不到，导入归班不会命中它，频道和作业只读不可见。
+        数据全部保留；班级的作业刷新 updated_at，/sync 把它们放进 removed_ids。reason 必填。已隐藏幂等。
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, maxLength: 200}}}
+      responses: {"204": {description: ok}}
+
+  /admin/classes/{class_id}/unhide:
+    post:
+      tags: [admin]
+      summary: 恢复被隐藏的班级（幂等）
+      parameters: [{$ref: '#/components/parameters/ClassId'}]
+      responses: {"204": {description: ok}}
+
+  /admin/classes/merge:
+    post:
+      tags: [admin]
+      summary: 手动合并两个班（与自动合并同一套逻辑，写 class_merges，可用 /admin/class-merges/{merge_id}/revert 撤销）
+      description: 两班须同学期、都未隐藏，否则 409 merge_stale。返回新的 class_merges id。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_class_id, into_class_id]
+              properties:
+                from_class_id: {type: integer}
+                into_class_id: {type: integer}
+                reason: {type: string, maxLength: 200}
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {type: object, properties: {merge_id: {type: integer}}}}}}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /admin/sources/{source_id}:
+    delete:
+      tags: [admin]
+      summary: 管理员直接删除一条作业来源（不必等投票）
+      description: |
+        软删除，deleted_reason=admin；作业无剩余来源时随之删除。penalize=true（默认）时按投票删除同样处理：
+        收回该来源贡献值并 -10、计入 30 天禁发次数；false 时只收回不罚。作者收到 content_deleted 通知（含 reason）。
+        可用 /admin/sources/{source_id}/restore 恢复（v2 起管理员删除的也能恢复）。
+      parameters: [{$ref: '#/components/parameters/SourceId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string, maxLength: 200}
+                penalize: {type: boolean, default: true}
+      responses: {"204": {description: ok}}
+
+  /admin/messages/{message_id}:
+    delete:
+      tags: [admin]
+      summary: 管理员删除频道消息（幂等，reason 必填）
+      parameters: [{$ref: '#/components/parameters/MessageId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [reason], properties: {reason: {type: string, maxLength: 200}}}
+      responses: {"204": {description: ok}}
+
+  /admin/users:
+    get:
+      tags: [admin]
+      summary: 按昵称找用户（前缀/包含，最多 50 条）
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 1}}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AdminUser'}}}}}
+
+  /admin/users/{user_id}:
+    get:
+      tags: [admin]
+      summary: 用户详情（只含公开信息与违规记录，见 AdminUser）
+      parameters: [{$ref: '#/components/parameters/UserId'}]
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AdminUser'}}}}
+    patch:
+      tags: [admin]
+      summary: 强制改违规昵称
+      description: 新昵称同注册规则（1–20 字、不重名、非保留词）；用户收到 nickname_reset 通知。不能改管理员自己以外的 role。
+      parameters: [{$ref: '#/components/parameters/UserId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname, reason]
+              properties:
+                nickname: {type: string}
+                reason: {type: string, maxLength: 200}
+      responses:
+        "200": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AdminUser'}}}}
+        "400": {$ref: '#/components/responses/Error'}
+        "409": {$ref: '#/components/responses/Error'}
+
+  /admin/users/{user_id}/sanctions:
+    post:
+      tags: [admin]
+      summary: 处罚：禁言（频道）/ 全站禁发作业 / 封号
+      description: |
+        days 1–365；mute 与 post_ban 必须给 days；disable 不给 days 即永久。reason 必填。
+        disable 立即作废该用户所有 refresh token、写 users.disabled_at，登录返回 403 account_disabled；
+        内容不自动删除。对管理员本人 403 forbidden。用户收到 sanction 通知（kind、ends_at、reason）。
+      parameters: [{$ref: '#/components/parameters/UserId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, reason]
+              properties:
+                kind: {type: string, enum: [mute, post_ban, disable]}
+                days: {type: [integer, "null"], minimum: 1, maximum: 365}
+                reason: {type: string, maxLength: 200}
+      responses:
+        "201": {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Sanction'}}}}
+        "400": {$ref: '#/components/responses/Error'}
+        "403": {$ref: '#/components/responses/Error'}
+
+  /admin/sanctions/{sanction_id}/lift:
+    post:
+      tags: [admin]
+      summary: 解除处罚（幂等）；解除 disable 同时清空 users.disabled_at
+      parameters:
+        - {name: sanction_id, in: path, required: true, schema: {type: integer}}
+      responses: {"204": {description: ok}}
+
+  /admin/users/{user_id}/points:
+    post:
+      tags: [admin]
+      summary: 调整某人在某班的贡献值
+      description: |
+        delta −100..100 且非 0；写 points_ledger reason=admin_adjust、status=settled、note=reason，不计入每日 30 上限。
+        用户收到 points_adjusted 通知，在「我的贡献值」明细里看到原因。
+      parameters: [{$ref: '#/components/parameters/UserId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [class_id, delta, reason]
+              properties:
+                class_id: {type: integer}
+                delta: {type: integer, minimum: -100, maximum: 100}
+                reason: {type: string, maxLength: 200}
+      responses:
+        "201": {description: ok}
+        "400": {$ref: '#/components/responses/Error'}
+
+  /admin/actions:
+    get:
+      tags: [admin]
+      summary: 管理员操作日志（最近 200 条，倒序）。所有 /admin 写操作都会记一行
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: integer}
+                    action: {type: string}
+                    target_kind: {type: string}
+                    target_id: {type: integer}
+                    reason: {type: [string, "null"]}
+                    payload: {type: object}
+                    created_at: {type: string, format: date-time}
+
 components:
   securitySchemes:
     bearer: {type: http, scheme: bearer}
@@ -943,6 +1275,8 @@ components:
     AssignmentId: {name: assignment_id, in: path, required: true, schema: {type: integer}}
     SourceId: {name: source_id, in: path, required: true, schema: {type: integer}}
     ProposalId: {name: proposal_id, in: path, required: true, schema: {type: integer}}
+    MessageId: {name: message_id, in: path, required: true, schema: {type: integer}}
+    UserId: {name: user_id, in: path, required: true, schema: {type: integer}}
     WorkerId: {name: X-Worker-Id, in: header, required: false, schema: {type: string, maxLength: 64}, description: worker 标识（排查用）}
 
   responses:
@@ -967,7 +1301,8 @@ components:
                      bad_password, bad_request, rate_limited, invite_quota_exhausted, invalid_slot,
                      no_semester, nickname_reserved, class_archived, method_not_allowed, internal,
                      bad_attachment, bad_file_type, already_thanked, self_vote, already_proposed, merge_stale,
-                     merge_closed, merge_chain, not_restorable, effective_too_soon]
+                     merge_closed, merge_chain, not_restorable, effective_too_soon,
+                     muted, bad_body, chat_rate_limited, already_reported, report_closed, account_disabled]
         message: {type: string, description: 可直接展示的中文}
 
     Tokens:
@@ -999,6 +1334,10 @@ components:
         registered_via: {type: string, enum: [invite, campus, bootstrap]}
         leaderboard_anonymous: {type: boolean}
         invites_remaining: {type: integer, description: 5 − 已生成的码数（未使用的也占）}
+        restrictions:
+          type: array
+          description: v2：我当前生效的处罚（管理员禁言 / 全站禁发），App 在「我的」和发消息、发作业处提示原因与到期时间
+          items: {type: object, properties: {kind: {type: string, enum: [mute, post_ban]}, ends_at: {type: string, format: date-time}, reason: {type: string}}}
 
     SlotInput:
       type: object
@@ -1028,6 +1367,7 @@ components:
         teacher: {type: [string, "null"]}
         slots: {type: array, items: {$ref: '#/components/schemas/Slot'}}
         member_count: {type: integer}
+        last_message_id: {type: [integer, "null"], description: v2：仅 /me/classes 返回，频道最新一条未删除消息 id；App 与本地「已读到」比较显示小红点}
 
     Attachment:
       type: object
@@ -1062,6 +1402,7 @@ components:
         id: {type: integer}
         kind: {type: string, enum: [first, supplement]}
         author_nickname: {type: string}
+        is_mine: {type: boolean, description: v2：是否我发的（按用户 id，不按昵称）}
         body: {type: string}
         stated_ddl: {type: [string, "null"], format: date-time}
         attachments: {type: array, items: {$ref: '#/components/schemas/Attachment'}}
@@ -1094,6 +1435,7 @@ components:
         - type: object
           properties:
             first_poster_nickname: {type: string}
+            is_first_poster: {type: boolean, description: v2：我是否首发者（按用户 id），决定是否显示「编辑」}
             sources: {type: array, items: {$ref: '#/components/schemas/Source'}}
             merged_from: {type: array, items: {type: integer}}
             pending_merges: {type: array, items: {$ref: '#/components/schemas/MergeProposal'}}
@@ -1113,7 +1455,8 @@ components:
       type: object
       properties:
         delta: {type: integer}
-        reason: {type: string, enum: [first_post, supplement, thanks, deleted_revoke, deleted_penalty, restore_refund, merge_adjust]}
+        reason: {type: string, enum: [first_post, supplement, thanks, deleted_revoke, deleted_penalty, restore_refund, merge_adjust, admin_adjust]}
+        note: {type: [string, "null"], description: v2：admin_adjust 的原因}
         status: {type: string, enum: [pending, settled, void]}
         class_name: {type: string}
         assignment_title: {type: [string, "null"]}
@@ -1124,6 +1467,8 @@ components:
       description: |
         kind：merge_request（有人提议合并你的作业）、merge_applied、content_deleted、content_restored、ban（禁发，payload.ends_at）、
         invitee_violation（你邀请的人内容被删，payload.invitee_nickname）、announcement（规则公告）。
+        v2 新增：sanction（被禁言/禁发/封号，payload.kind、ends_at、reason）、nickname_reset（payload.old、new、reason）、
+        points_adjusted（payload.delta、class_name、reason）、class_hidden（你加入的班被隐藏，payload.class_name）。
       properties:
         id: {type: integer}
         kind: {type: string}
@@ -1142,3 +1487,70 @@ components:
         expires_at: {type: string, format: date-time, description: 创建后 2 分钟，到期未完成即 expired}
         output: {type: [object, "null"]}
         error: {type: [string, "null"]}
+
+    # ---- v2 ----
+    Message:
+      type: object
+      properties:
+        id: {type: integer}
+        class_id: {type: integer}
+        author_nickname: {type: string}
+        is_mine: {type: boolean}
+        body: {type: string}
+        created_at: {type: string, format: date-time}
+
+    Sanction:
+      type: object
+      properties:
+        id: {type: integer}
+        kind: {type: string, enum: [mute, post_ban, disable]}
+        reason: {type: string}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: [string, "null"], format: date-time, description: null = 永久（仅 disable）}
+        lifted_at: {type: [string, "null"], format: date-time}
+
+    AdminUser:
+      type: object
+      description: |
+        管理员能看到的用户信息，只有这些字段。不含、也没有任何接口能拿到：密码/恢复码/token、
+        此人加入了哪些班、个人课表、作业完成情况、提醒、AI 任务内容、IP。
+      properties:
+        id: {type: integer}
+        nickname: {type: string}
+        role: {type: string, enum: [user, admin]}
+        registered_via: {type: string, enum: [invite, campus, bootstrap]}
+        inviter_nickname: {type: [string, "null"], description: 邀请人昵称（违规追溯用）}
+        created_at: {type: string, format: date-time}
+        disabled: {type: boolean}
+        contribution_total: {type: integer, description: 本学期已结算贡献值合计}
+        deleted_content_30d: {type: integer, description: 近 30 天被删除（投票或管理员）的来源数}
+        reports_against_open: {type: integer}
+        sanctions: {type: array, items: {$ref: '#/components/schemas/Sanction'}, description: 最近 20 条，含已解除}
+
+    AdminClass:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        teacher: {type: [string, "null"]}
+        semester_name: {type: string}
+        member_count: {type: integer}
+        assignment_count: {type: integer}
+        slot_count: {type: integer}
+        created_by_nickname: {type: string}
+        created_at: {type: string, format: date-time}
+        hidden: {type: boolean}
+
+    AdminReport:
+      type: object
+      properties:
+        id: {type: integer, description: 该对象最早一条未处理举报的 id，用于 resolve}
+        target_kind: {type: string, enum: [source, message, class, user]}
+        target_id: {type: integer}
+        target: {type: object, description: 见 /admin/reports 的说明}
+        reporters:
+          type: array
+          items: {type: object, properties: {nickname: {type: string}, reason: {type: string}, created_at: {type: string, format: date-time}}}
+        handled_at: {type: [string, "null"], format: date-time}
+        resolution: {type: [string, "null"], enum: [removed, dismissed, null]}
+
