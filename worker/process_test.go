@@ -91,7 +91,7 @@ func TestBuildMessagesWithImages(t *testing.T) {
 		"context":    json.RawMessage(`{"today":"2026-10-16","weekday":5}`),
 		"image_urls": json.RawMessage(`["/files/a.png?sig=1","/files/b.png?sig=2"]`),
 	}
-	msgs, err := p.buildMessages(context.Background(), "parse_timetable", in)
+	msgs, err := p.buildMessages(context.Background(), "parse_timetable", in, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,10 +107,10 @@ func TestBuildMessagesWithImages(t *testing.T) {
 		t.Fatalf("text = %s", txt) // 签名链接不发给模型
 	}
 	in["image_urls"] = json.RawMessage(`["/files/missing.png"]`)
-	if _, err := p.buildMessages(context.Background(), "parse_timetable", in); err == nil {
+	if _, err := p.buildMessages(context.Background(), "parse_timetable", in, ""); err == nil {
 		t.Fatal("missing image accepted")
 	}
-	if _, err := p.buildMessages(context.Background(), "unknown", in); err == nil {
+	if _, err := p.buildMessages(context.Background(), "unknown", in, ""); err == nil {
 		t.Fatal("unknown kind accepted")
 	}
 }

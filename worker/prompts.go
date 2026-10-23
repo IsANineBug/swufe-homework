@@ -29,12 +29,18 @@ var taskPrompts = map[string]string{
 
 	"parse_timetable": `任务：识别易校园课表截图，输出每个课块。
 - 每个课块一条：name 课名、room 教室、weekday 星期（1=周一 … 5=周五）、start/end 起止节（1–12）。
-- 节次按左侧时间轴和课块高度对照 context.periods 的 12 节作息推算。
-- 课块从截图上方被裁掉时 start_visible=false，start 给能看到的最早节；否则 start_visible=true。
-- 课名显示不全（有省略号或被截断）时 truncated=true，name 填看得到的部分；否则 truncated=false。
+- 节次怎么定：先读左侧时间轴的节次刻度（每一行一节），再看课块的顶边和底边分别落在哪一行，
+  start=顶边所在行、end=底边所在行，对照 context.periods 的 12 节作息核对。
+  课块高度跨两行及以上时 start 与 end 必须不同，不能只给一节；只有高度约等于一行的课块才是单节课。
+- 顶部被裁（必须遵守）：课块顶边贴着截图最上沿、或被顶部表头/星期栏遮住、或顶边以上看不到完整的上一行刻度时，
+  start_visible=false，start 给能看到的最早节；只有能清楚看到课块完整顶边时才 start_visible=true。
+  拿不准就给 start_visible=false，让用户核对，不要猜成 true。
+- 课名显示不全（有省略号、被截断，或课块底边贴着截图最下沿导致课名/教室显示不全）时 truncated=true，
+  name 填看得到的部分，看不到的教室给 null；否则 truncated=false。
 - 有多张截图（上下两截）时按节次拼接，同一课块只输出一次。
 - 教室规范化为「楼栋+房间号」，去掉 @ 和空格，如「经世楼G101」；看不到教室给 null。
 - 灰色「非本周」的课也要输出。只输出周一到周五。
+- 输出前逐个课块自检：顶边是否贴着截图上沿或表头（是则 start_visible=false）；跨几行就给几节。
 不要合并不同星期的课块，不要判断班级归属。`,
 
 	"dedupe_review": `任务：判断草稿 draft 与每条候选作业 candidates 是否是同一份作业。

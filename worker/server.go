@@ -158,33 +158,53 @@ const MaxImageBytes = 10 << 20
 
 var allowedImageTypes = map[string]bool{"image/jpeg": true, "image/png": true, "image/webp": true}
 
-// FetchImage 下载服务器签名的图片，返回 data URL。只允许本服务器的 /files/ 链接，防止被诱导访问任意地址。
-func (s *ServerClient) FetchImage(ctx context.Context, link string) (string, error) {
+// openImage 只允许本服务器的 /files/ 链接，防止被诱导访问任意地址。调用方负责关闭 Body。
+func (s *ServerClient) openImage(ctx context.Context, link string) (*http.Response, error) {
 	u, err := url.Parse(link)
 	if err != nil {
-		return "", fmt.Errorf("图片链接格式不对")
+		return nil, fmt.Errorf("图片链接格式不对")
 	}
 	if u.IsAbs() || u.Host != "" {
 		if u.Scheme != s.origin.Scheme || u.Host != s.origin.Host {
-			return "", fmt.Errorf("拒绝下载非本服务器的图片")
+			return nil, fmt.Errorf("拒绝下载非本服务器的图片")
 		}
 	}
 	if !strings.HasPrefix(u.Path, "/files/") || strings.Contains(u.Path, "..") {
-		return "", fmt.Errorf("拒绝下载非 /files/ 的链接")
+		return nil, fmt.Errorf("拒绝下载非 /files/ 的链接")
 	}
 	full := s.origin.ResolveReference(&url.URL{Path: u.Path, RawPath: u.RawPath, RawQuery: u.RawQuery})
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full.String(), nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	resp, err := s.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("下载图片失败：HTTP %d", resp.StatusCode)
+	}
+	return resp, nil
+}
+
+// SpoolImage 下载服务器签名的图片，边下边写进 dir 下的临时文件（不整张读进内存）。
+func (s *ServerClient) SpoolImage(ctx context.Context, link, dir string) (*SpooledImage, error) {
+	resp, err := s.openImage(ctx, link)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return spoolBody(resp.Body, dir)
+}
+
+// FetchImage 下载服务器签名的图片，返回 data URL（整张在内存里；任务处理走 SpoolImage）。
+func (s *ServerClient) FetchImage(ctx context.Context, link string) (string, error) {
+	resp, err := s.openImage(ctx, link)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("下载图片失败：HTTP %d", resp.StatusCode)
-	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, MaxImageBytes+1))
 	if err != nil {
 		return "", err
@@ -192,12 +212,9 @@ func (s *ServerClient) FetchImage(ctx context.Context, link string) (string, err
 	if len(b) > MaxImageBytes {
 		return "", fmt.Errorf("图片超过 10MB")
 	}
-	ct := http.DetectContentType(b)
-	if ct == "application/octet-stream" && len(b) > 12 && string(b[0:4]) == "RIFF" && string(b[8:12]) == "WEBP" {
-		ct = "image/webp"
-	}
-	if !allowedImageTypes[ct] {
-		return "", fmt.Errorf("不支持的图片类型 %s", ct)
+	ct := imageType(b)
+	if ct == "" {
+		return "", fmt.Errorf("不支持的图片类型 %s", http.DetectContentType(b))
 	}
 	return "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(b), nil
 }

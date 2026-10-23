@@ -14,20 +14,34 @@ import (
 
 // Config 全部来自同目录 .env（系统环境变量同名时优先，便于 launchd / systemd 覆盖）。
 type Config struct {
-	ServerURL     *url.URL // 形如 https://1.2.3.4:8443/api/v1
-	WorkerToken   string
-	CertPins      []string // sha256/<base64>，可多个
-	LLMBaseURL    string
-	LLMAPIKey     string
-	LLMModel      string
-	LLMJSONMode   bool     // 请求 response_format=json_object
-	Proxy         *url.URL // 只用于访问 LLM；连服务器不走代理
-	WorkerID      string
-	Concurrency   int
-	ActiveHours   *Window // 可选：只在这个时段在线
-	JobTimeout    time.Duration
-	HeartbeatEach time.Duration
+	ServerURL      *url.URL // 形如 https://1.2.3.4:8443/api/v1
+	WorkerToken    string
+	CertPins       []string // sha256/<base64>，可多个
+	LLMBaseURL     string
+	LLMAPIKey      string
+	LLMModel       string
+	LLMJSONMode    bool     // 请求 response_format=json_object
+	LLMMaxTokens   int      // 识图/解析作业的输出上限；文字任务取 min(此值, 16384)
+	LLMTemperature *float64 // nil = 不传 temperature
+	Proxy          *url.URL // 只用于访问 LLM；连服务器不走代理
+	WorkerID       string
+	Concurrency    int
+	ActiveHours    *Window // 可选：只在这个时段在线
+	JobTimeout     time.Duration
+	HeartbeatEach  time.Duration
 }
+
+// DefaultLLMModel Command Code 上 Gemini 3.8 Flash 的模型 id（思考等级由 Command Code 固定为 high）。
+// 来源：commandcode.ai 模型清单（docs/reference/cli/models），未用 API Key 实测 GET /models，可用 LLM_MODEL 覆盖。
+const DefaultLLMModel = "google/gemini-3.8-flash"
+
+// LLM_MAX_TOKENS 的默认值与允许范围。
+const (
+	DefaultMaxTokens = 32768
+	MinMaxTokens     = 4096
+	MaxMaxTokens     = 65536
+	TextTaskMaxCap   = 16384
+)
 
 // Window 每天的在线时段，[From, To) 小时，To 可为 24。
 type Window struct{ From, To int }
@@ -106,7 +120,7 @@ func LoadConfig(dotenv map[string]string, lookup func(string) (string, bool)) (*
 		WorkerToken:   get("WORKER_TOKEN", ""),
 		LLMBaseURL:    strings.TrimRight(get("LLM_BASE_URL", ""), "/"),
 		LLMAPIKey:     get("LLM_API_KEY", ""),
-		LLMModel:      get("LLM_MODEL", "deepseek-v4.1-flash"),
+		LLMModel:      get("LLM_MODEL", DefaultLLMModel),
 		JobTimeout:    90 * time.Second,
 		HeartbeatEach: 20 * time.Second,
 	}
@@ -155,6 +169,18 @@ func LoadConfig(dotenv map[string]string, lookup func(string) (string, bool)) (*
 	case "off", "0", "false":
 	default:
 		errs = append(errs, "LLM_JSON_MODE 只能是 on / off")
+	}
+	c.LLMMaxTokens, err = strconv.Atoi(get("LLM_MAX_TOKENS", strconv.Itoa(DefaultMaxTokens)))
+	if err != nil || c.LLMMaxTokens < MinMaxTokens || c.LLMMaxTokens > MaxMaxTokens {
+		errs = append(errs, fmt.Sprintf("LLM_MAX_TOKENS 须为 %d–%d 的整数", MinMaxTokens, MaxMaxTokens))
+	}
+	if v := get("LLM_TEMPERATURE", ""); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 || f > 2 {
+			errs = append(errs, "LLM_TEMPERATURE 须为 0–2 的数，或留空（不传，用模型默认值）")
+		} else {
+			c.LLMTemperature = &f
+		}
 	}
 	c.Concurrency, err = strconv.Atoi(get("WORKER_CONCURRENCY", "2"))
 	if err != nil || c.Concurrency < 1 || c.Concurrency > 8 {

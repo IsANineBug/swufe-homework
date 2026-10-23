@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +26,7 @@ func spkiPin(t *testing.T, srv *httptest.Server) string {
 func testConfig(t *testing.T, srv *httptest.Server, pins ...string) *Config {
 	u, _ := url.Parse(srv.URL + "/api/v1")
 	return &Config{ServerURL: u, WorkerToken: "tok-0123456789abcdef01234", CertPins: pins, WorkerID: "pc",
-		Concurrency: 1, JobTimeout: 5 * time.Second, HeartbeatEach: 50 * time.Millisecond, LLMModel: "m"}
+		Concurrency: 1, JobTimeout: 90 * time.Second, HeartbeatEach: 50 * time.Millisecond, LLMModel: "m"}
 }
 
 func TestCertPinning(t *testing.T) {
@@ -79,9 +81,22 @@ func TestFetchImageOnlyFromServerFiles(t *testing.T) {
 		if _, err := s.FetchImage(ctx, link); err == nil {
 			t.Errorf("%s accepted", link)
 		}
+		if _, err := s.SpoolImage(ctx, link, t.TempDir()); err == nil {
+			t.Errorf("spool %s accepted", link)
+		}
 	}
 	if _, err := s.FetchImage(ctx, "/files/x.html"); err == nil || !strings.Contains(err.Error(), "不支持") {
 		t.Errorf("html accepted: %v", err)
+	}
+	if _, err := s.SpoolImage(ctx, "/files/x.html", t.TempDir()); err == nil || !strings.Contains(err.Error(), "不支持") {
+		t.Errorf("spool html accepted: %v", err)
+	}
+	img, err := s.SpoolImage(ctx, "/files/a%20b.png?exp=1&sig=abc", t.TempDir())
+	if err != nil || img.Mime != "image/png" || img.Size != int64(len(png)) {
+		t.Fatalf("spool = %+v %v", img, err)
+	}
+	if b, _ := os.ReadFile(img.Path); !bytes.Equal(b, png) {
+		t.Fatal("落盘内容不一致")
 	}
 }
 
@@ -167,4 +182,6 @@ func TestWorkerEndToEnd(t *testing.T) {
 
 type chatFunc func(ctx context.Context, msgs []Message) (string, error)
 
-func (f chatFunc) Chat(ctx context.Context, msgs []Message) (string, error) { return f(ctx, msgs) }
+func (f chatFunc) Chat(ctx context.Context, msgs []Message, _ CallOpts) (string, error) {
+	return f(ctx, msgs)
+}

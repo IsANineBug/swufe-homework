@@ -24,7 +24,7 @@ import (
 //	docs/seed-timetable/<名字>-1.png、-2.png   上下两截
 //	docs/seed-timetable/<名字>.expected.json  {"slots":[{name,room,weekday,start,end,truncated,start_visible}...]}
 //
-// 默认跳过（要花模型额度）。在电脑上跑：
+// 默认跳过（要花模型额度）。在有模型 Key 的机器上跑：
 //
 //	WORKER_REGRESSION=1 WORKER_ENV=./.env go test -run TestTimetableRegression -v .
 const seedDir = "../docs/seed-timetable"
