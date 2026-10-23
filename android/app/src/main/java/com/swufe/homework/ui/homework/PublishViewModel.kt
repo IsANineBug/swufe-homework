@@ -15,6 +15,7 @@ import com.swufe.homework.data.api.AssignmentCreate
 import com.swufe.homework.data.api.AssignmentSummary
 import com.swufe.homework.data.api.Attachment
 import com.swufe.homework.data.api.SourceCreate
+import com.swufe.homework.data.api.SourcePatch
 import com.swufe.homework.data.api.userMessage
 import com.swufe.homework.data.repo.AssignmentRepository
 import com.swufe.homework.ui.nav.Routes
@@ -188,7 +189,7 @@ class PublishViewModel @Inject constructor(
                     }
                     PublishMode.Edit -> {
                         busy = "正在保存…"
-                        repo.editSource(route.sourceId, SourceCreate(body.trim(), ddl, ids))
+                        repo.patchSource(route.sourceId, SourcePatch.full(body.trim(), ddl, ids))
                             .onSuccess { onDone(route.assignmentId) }.onFailure { error = it.userMessage }
                     }
                 }

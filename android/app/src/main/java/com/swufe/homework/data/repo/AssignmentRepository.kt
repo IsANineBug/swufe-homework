@@ -9,6 +9,7 @@ import com.swufe.homework.data.api.AiSpamOutput
 import com.swufe.homework.data.api.ApiException
 import com.swufe.homework.data.api.Assignment
 import com.swufe.homework.data.api.AssignmentCreate
+import com.swufe.homework.data.api.AssignmentPatch
 import com.swufe.homework.data.api.AssignmentSummary
 import com.swufe.homework.data.api.Attachment
 import com.swufe.homework.data.api.CandidatesRequest
@@ -20,6 +21,7 @@ import com.swufe.homework.data.api.MergeProposalCreate
 import com.swufe.homework.data.api.PointsPage
 import com.swufe.homework.data.api.Source
 import com.swufe.homework.data.api.SourceCreate
+import com.swufe.homework.data.api.SourcePatch
 import com.swufe.homework.data.api.SwufeApi
 import com.swufe.homework.data.api.apiCall
 import com.swufe.homework.data.api.orThrow
@@ -75,6 +77,14 @@ class AssignmentRepository @Inject constructor(
 
     suspend fun editSource(sourceId: Int, body: SourceCreate): Result<Source> =
         apiCall { api.editSource(sourceId, body) }.onSuccess { reminders.sync() }
+
+    /** WS11：PATCH /sources/{id}，可显式清空 stated_ddl（issue #8）。 */
+    suspend fun patchSource(sourceId: Int, body: SourcePatch): Result<Source> =
+        apiCall { api.patchSource(sourceId, body) }.onSuccess { reminders.sync() }
+
+    /** WS11：首发者改标题 / DDL（PATCH /assignments/{id}），改 DDL 后立即按新时间重排提醒。 */
+    suspend fun patchAssignment(id: Int, body: AssignmentPatch): Result<Assignment> =
+        apiCall { api.patchAssignment(id, body) }.onSuccess { reminders.apply(listOf(it.toSummary())) }
 
     suspend fun deleteSource(sourceId: Int): Result<Unit> =
         apiCall { api.deleteSource(sourceId).orThrow() }.onSuccess { reminders.sync() }
