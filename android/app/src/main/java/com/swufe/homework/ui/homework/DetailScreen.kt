@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
@@ -89,9 +90,10 @@ fun DetailScreen(
     onOpenAssignment: (Int) -> Unit,
     onSupplement: (classId: Int, assignmentId: Int) -> Unit,
     onEditSource: (classId: Int, assignmentId: Int, sourceId: Int) -> Unit,
+    onEditAssignment: (assignmentId: Int) -> Unit = {},
     vm: DetailViewModel = hiltViewModel(),
 ) {
-    val me by vm.me.collectAsStateWithLifecycle()
+    val votedMerges by vm.votedMerges.collectAsStateWithLifecycle()
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(vm.toast) { vm.toast?.let { snack.showSnackbar(it); vm.toast = null } }
     LifecycleResumeEffect(Unit) { vm.onResume(); onPauseOrDispose { } }
@@ -102,7 +104,18 @@ fun DetailScreen(
     var merging by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
-        topBar = { BackTopBar("作业详情", onBack) },
+        topBar = {
+            BackTopBar("作业详情", onBack) {
+                // 首发者（服务器 is_first_poster，按用户 id）可改标题、DDL、说明
+                val cur = vm.a
+                if (cur != null && canEditAssignment(cur, vm.gone)) {
+                    TextButton(onClick = { onEditAssignment(cur.id) }) {
+                        Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(" 编辑")
+                    }
+                }
+            }
+        },
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
             vm.a?.let { a ->
@@ -136,10 +149,14 @@ fun DetailScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                     TextButton(onClick = { onOpenAssignment(other) }) { Text("查看那条") }
                                     Spacer(Modifier.weight(1f))
-                                    if (p.fromId == a.id && vm.iAmFirstPoster) {
-                                        Button(onClick = { vm.acceptMerge(p.id) }) { Text("我是发布者，同意") }
-                                    } else {
-                                        OutlinedButton(onClick = { vm.voteMerge(p.id) }) { Text("赞同 ${p.votes}/${p.neededVotes}") }
+                                    when (mergeVoteState(p, votedMerges, viewingFrom = p.fromId == a.id, iAmFirstPoster = a.isFirstPoster)) {
+                                        MergeVoteState.CanAccept ->
+                                            Button(onClick = { vm.acceptMerge(p.id) }) { Text("我是发布者，同意") }
+                                        MergeVoteState.CanVote ->
+                                            OutlinedButton(onClick = { vm.voteMerge(p.id) }) { Text("赞同 ${p.votes}/${p.neededVotes}") }
+                                        // 我提议的（提议人算第 1 票）或已赞同过：禁用，避免 409 already_voted
+                                        MergeVoteState.Voted ->
+                                            OutlinedButton(onClick = {}, enabled = false) { Text("已赞同 ${p.votes}/${p.neededVotes}") }
                                     }
                                 }
                             }
@@ -150,7 +167,7 @@ fun DetailScreen(
                 items(a.sources, key = { "s${it.id}" }) { s ->
                     SourceCard(
                         s, a,
-                        mine = me?.nickname == s.authorNickname,
+                        mine = vm.isMine(s),
                         onImage = { viewing = it },
                         onThank = { vm.thank(s) },
                         onDeleteVote = { deleting = s },
@@ -168,7 +185,7 @@ fun DetailScreen(
         AlertDialog(
             onDismissRequest = { removingMine = null },
             title = { Text("删除自己的内容？") },
-            text = { Text("删除后这条内容的积分作废，不额外扣分。") },
+            text = { Text("删除后这条内容的贡献值作废，不额外扣分。") },
             confirmButton = { TextButton(onClick = { removingMine = null; vm.deleteMine(s, onBack) }) { Text("删除") } },
             dismissButton = { TextButton(onClick = { removingMine = null }) { Text("取消") } },
         )

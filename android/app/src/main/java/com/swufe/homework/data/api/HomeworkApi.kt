@@ -55,6 +55,10 @@ interface HomeworkApi {
     @PATCH("sources/{source_id}")
     suspend fun editSource(@Path("source_id") id: Int, @Body body: SourceCreate): Source
 
+    /** 只改给出的字段；可显式清空 stated_ddl（见 [SourcePatch]）。 */
+    @PATCH("sources/{source_id}")
+    suspend fun patchSource(@Path("source_id") id: Int, @Body body: SourcePatch): Source
+
     @DELETE("sources/{source_id}")
     suspend fun deleteSource(@Path("source_id") id: Int): Response<Unit>
 

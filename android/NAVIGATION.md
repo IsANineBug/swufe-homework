@@ -36,6 +36,11 @@
 | `MyPoints`、`PointsRules` | 我的贡献值、贡献值规则 |
 | `ReminderGuide` | 提醒设置引导（首次进入主界面自动打开一次） |
 
+## WS11 新增页面
+| 路由 | 页面 |
+|---|---|
+| `EditAssignment(id)` | 首发者编辑作业（标题、DDL → `PATCH /assignments/{id}`；说明 = 首发来源正文与图片 → `PATCH /sources/{id}`）。入口：作业详情顶栏「编辑」，仅 `Assignment.is_first_poster` 为真时显示 |
+
 ## 后台识图（WS10，v2）
 - `data/repo/AiJobTracker`（@Singleton）跟踪 `parse_timetable` / `parse_assignment`；`MainScreen` 顶部状态条、识别结束的 Snackbar、「AI 识别」通知都从它读。
 - 点状态条 / Snackbar / 通知：课表 → `TimetableImport`（失败「手动添加」→ `TimetableManual`）；作业 → `Publish(class_id, assignment_id, source_id)`（取自任务 context）。逻辑在 `ui/main/MainScreen.kt` 的 `openAiJob`。

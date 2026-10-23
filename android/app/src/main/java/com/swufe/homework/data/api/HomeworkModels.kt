@@ -2,7 +2,10 @@ package com.swufe.homework.data.api
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 // WS5：作业、来源、合并、删除投票、积分、榜单。与 docs/api.yaml components.schemas 一一对应，字段名保持 snake_case。
 
@@ -27,6 +30,8 @@ data class Source(
     val id: Int,
     val kind: String = "supplement",
     @SerialName("author_nickname") val authorNickname: String = "",
+    /** v2：是否我发的（服务器按用户 id 判断，不按昵称）。 */
+    @SerialName("is_mine") val isMine: Boolean = false,
     val body: String = "",
     @SerialName("stated_ddl") val statedDdl: String? = null,
     val attachments: List<Attachment> = emptyList(),
@@ -62,6 +67,8 @@ data class Assignment(
     @SerialName("reminder_text") val reminderText: JsonObject? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("first_poster_nickname") val firstPosterNickname: String = "",
+    /** v2：我是否首发者（服务器按用户 id 判断），决定详情页是否显示「编辑」。 */
+    @SerialName("is_first_poster") val isFirstPoster: Boolean = false,
     val sources: List<Source> = emptyList(),
     @SerialName("merged_from") val mergedFrom: List<Int> = emptyList(),
     @SerialName("pending_merges") val pendingMerges: List<MergeProposal> = emptyList(),
@@ -94,6 +101,25 @@ data class SourceCreate(
     @SerialName("stated_ddl") val statedDdl: String? = null,
     @SerialName("attachment_ids") val attachmentIds: List<Int> = emptyList(),
 )
+
+/**
+ * PATCH /sources/{id} 的请求体（api.yaml SourceCreate，服务器「只改给出的字段」）。
+ * 全局 Json 配置了 explicitNulls = false，Kotlin 的 null 会被省略，没法表达「清空」；
+ * 所以 stated_ddl 用 JsonElement：null = 不改（不下发），[JsonNull] = 显式下发 null 清空，字符串 = 改成该时间。
+ * 修 issue #8：编辑来源时清空「你看到的 DDL」要显式下发 null。
+ */
+@Serializable
+data class SourcePatch(
+    val body: String? = null,
+    @SerialName("stated_ddl") val statedDdl: JsonElement? = null,
+    @SerialName("attachment_ids") val attachmentIds: List<Int>? = null,
+) {
+    companion object {
+        /** 编辑整条来源：正文、附件整体替换；ddl 为 null 时显式清空「你看到的 DDL」。 */
+        fun full(body: String, ddl: String?, attachmentIds: List<Int>) =
+            SourcePatch(body, ddl?.let { JsonPrimitive(it) } ?: JsonNull, attachmentIds)
+    }
+}
 
 @Serializable
 data class CandidatesRequest(val title: String, val ddl: String? = null)
