@@ -1,10 +1,8 @@
 package com.swufe.homework.ui.common
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,7 +27,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
@@ -37,6 +34,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.swufe.homework.data.repo.UpdateInfo
+import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.Spacing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +58,7 @@ fun ErrorText(msg: String?) {
 
 @Composable
 fun LoadingButton(text: String, loading: Boolean, enabled: Boolean = true, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
-    Button(onClick = onClick, enabled = enabled && !loading, modifier = modifier) {
+    Button(onClick = onClick, enabled = enabled && !loading, modifier = modifier, shape = Corners.Button) {
         if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text(text)
     }
 }
@@ -84,15 +83,13 @@ fun PasswordField(value: String, onChange: (String) -> Unit, label: String, modi
 }
 
 @Composable
-fun CenterLoading() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-}
+fun CenterLoading() = LoadingState()
 
 @Composable
 fun FormColumn(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier.fillMaxWidth().padding(horizontal = Spacing.xl, vertical = Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) { content() }
 }
 

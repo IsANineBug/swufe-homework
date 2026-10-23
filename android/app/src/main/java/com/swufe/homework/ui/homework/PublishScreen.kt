@@ -48,7 +48,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -61,6 +60,7 @@ import com.swufe.homework.util.Ddl
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneOffset
+import com.swufe.homework.ui.theme.semantic
 
 /** 发布作业 / 补充 / 编辑自己的来源。课程由班级页决定。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -158,7 +158,7 @@ fun PublishScreen(onBack: () -> Unit, onDone: (Int) -> Unit, vm: PublishViewMode
                 }
             }
             if (vm.uncertain.isNotEmpty()) {
-                Text("标黄的是识别拿不准的内容，请核对后再发布。", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7A5B00))
+                Text("标黄的是识别拿不准的内容，请核对后再发布。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.semantic.warning)
             }
 
             ErrorText(vm.error)

@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -23,23 +22,26 @@ import androidx.compose.ui.unit.dp
 import com.swufe.homework.BuildConfig
 import com.swufe.homework.data.api.AssignmentSummary
 import com.swufe.homework.util.Ddl
+import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.semantic
 
-/** DDL 不一致（ddl_conflict）统一用这个红。 */
-val ConflictRed = Color(0xFFD32F2F)
+/** DDL 不一致（ddl_conflict）、24 小时内截止统一用这个红（主题语义色 urgent，随深浅模式切换）。 */
+val ConflictRed: Color
+    @Composable get() = MaterialTheme.semantic.urgent
 
 @Composable
 fun Tag(text: String, container: Color, content: Color) {
-    Surface(color = container, contentColor = content, shape = RoundedCornerShape(4.dp)) {
+    Surface(color = container, contentColor = content, shape = Corners.Tag) {
         Text(text, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
     }
 }
 
 /** 「待确认」标签（ddl_uncertain）。 */
 @Composable
-fun UncertainTag() = Tag("待确认", Color(0xFFFFF3C4), Color(0xFF7A5B00))
+fun UncertainTag() = Tag("待确认", MaterialTheme.semantic.warningContainer, MaterialTheme.semantic.onWarningContainer)
 
 @Composable
-fun ConflictTag() = Tag("DDL 不一致", ConflictRed.copy(alpha = 0.12f), ConflictRed)
+fun ConflictTag() = Tag("DDL 不一致", MaterialTheme.semantic.urgentContainer, MaterialTheme.semantic.onUrgentContainer)
 
 /** 10月23日 周五 13:55 · 还剩 2 天；不一致时整行标红。 */
 @Composable

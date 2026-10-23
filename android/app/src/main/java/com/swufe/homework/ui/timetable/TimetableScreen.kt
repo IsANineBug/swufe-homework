@@ -34,7 +34,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -46,6 +45,7 @@ import com.swufe.homework.data.api.Period
 import com.swufe.homework.ui.common.ErrorText
 import com.swufe.homework.ui.theme.CourseColors
 import com.swufe.homework.util.WEEKDAY_NAMES
+import com.swufe.homework.ui.theme.OnCourseColor
 
 private val ROW_H = 56.dp
 private val AXIS_W = 40.dp
@@ -143,8 +143,8 @@ fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (
                             .padding(3.dp),
                     ) {
                         Column {
-                            Text(b.name, color = Color.White, fontSize = 11.sp, lineHeight = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                            Text(b.room, color = Color.White.copy(alpha = 0.9f), fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(b.name, color = OnCourseColor, fontSize = 11.sp, lineHeight = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            Text(b.room, color = OnCourseColor.copy(alpha = 0.9f), fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }

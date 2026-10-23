@@ -37,7 +37,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -52,6 +51,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.swufe.homework.ui.theme.semantic
 
 @HiltViewModel
 class ReminderGuideViewModel @Inject constructor(
@@ -114,7 +114,7 @@ private fun Step(title: String, sub: String, ok: Boolean?, onClick: () -> Unit) 
     ListItem(
         leadingContent = {
             when (ok) {
-                true -> Icon(Icons.Filled.CheckCircle, contentDescription = "已开启", tint = Color(0xFF2E7D32))
+                true -> Icon(Icons.Filled.CheckCircle, contentDescription = "已开启", tint = MaterialTheme.semantic.success)
                 false -> Icon(Icons.Filled.RadioButtonUnchecked, contentDescription = "未开启")
                 null -> Icon(Icons.Filled.RadioButtonUnchecked, contentDescription = "需手动确认", tint = MaterialTheme.colorScheme.outline)
             }
