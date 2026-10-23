@@ -1,9 +1,5 @@
 package com.swufe.homework.data.repo
 
-import com.swufe.homework.data.api.AiJob
-import com.swufe.homework.data.api.AiJobRequest
-import com.swufe.homework.data.api.AiTimetableOutput
-import com.swufe.homework.data.api.ApiException
 import com.swufe.homework.data.api.ClassInfo
 import com.swufe.homework.data.api.Period
 import com.swufe.homework.data.api.SlotInput
@@ -16,17 +12,10 @@ import com.swufe.homework.data.local.TimetableDao
 import com.swufe.homework.data.local.toPeriod
 import com.swufe.homework.data.local.toSlot
 import com.swufe.homework.util.ImageCompressor
-import com.swufe.homework.util.SlotDraft
 import android.net.Uri
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -44,7 +33,6 @@ val DEFAULT_PERIODS = listOf(
 class TimetableRepository @Inject constructor(
     private val api: SwufeApi,
     private val dao: TimetableDao,
-    private val json: Json,
     private val compressor: ImageCompressor,
 ) {
     val classes: Flow<List<ClassInfo>> = combine(dao.classes(), dao.slots()) { cs, ss ->
@@ -82,38 +70,17 @@ class TimetableRepository @Inject constructor(
             .onSuccess { refreshClasses() }
 
     /**
-     * 上传 1–2 张截图 → parse_timetable → 轮询（1.5 秒一次，最多 2 分钟）。
-     * 返回给确认页的草稿；AI 只出草稿，不入库。
+     * 压缩并上传课表截图，返回 attachment_ids。识别本身交给 [AiJobTracker]（parse_timetable，只传 attachment_ids，
+     * issue #4 裁决 6：服务器校验归属后自行签名生成 image_urls），AI 只出草稿，不入库。
      */
-    suspend fun recognize(images: List<Uri>, onStage: (String) -> Unit): Result<List<SlotDraft>> = apiCall {
+    suspend fun uploadScreenshots(images: List<Uri>): Result<List<Int>> = apiCall {
         require(images.size in 1..2)
-        onStage("正在上传截图…")
-        val attachments = images.map { uri ->
+        images.map { uri ->
             val bytes = compressor.compress(uri)
             val part = MultipartBody.Part.createFormData(
                 "file", "timetable.jpg", bytes.toRequestBody("image/jpeg".toMediaType()),
             )
-            api.upload(part)
-        }
-        onStage("电脑正在识别…")
-        // issue #4 裁决 6：App 只传 attachment_ids，服务器校验归属后自行签名生成 image_urls
-        val input = buildJsonObject {
-            putJsonArray("attachment_ids") { attachments.forEach { add(JsonPrimitive(it.id)) } }
-        }
-        var job: AiJob = api.createAiJob(AiJobRequest(kind = "parse_timetable", input = input))
-        val deadline = System.currentTimeMillis() + 120_000
-        while (job.status == "queued" || job.status == "running") {
-            if (System.currentTimeMillis() > deadline) throw ApiException("expired", "识别超时，请手动添加")
-            delay(1500)
-            job = api.aiJob(job.id)
-        }
-        when (job.status) {
-            "done" -> {
-                val out = json.decodeFromJsonElement(AiTimetableOutput.serializer(), job.output ?: buildJsonObject { put("slots", kotlinx.serialization.json.JsonArray(emptyList())) })
-                out.slots.map { SlotDraft.fromAi(it) }
-            }
-            "expired" -> throw ApiException("expired", "识别超时，请手动添加")
-            else -> throw ApiException("ai_failed", job.error?.let { "识别失败：$it" } ?: "识别失败，请手动添加")
+            api.upload(part).id
         }
     }
 }

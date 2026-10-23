@@ -1,5 +1,7 @@
 package com.swufe.homework.ui.common
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -15,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.Spacing
 import kotlinx.coroutines.delay
 
 /**
@@ -23,6 +26,7 @@ import kotlinx.coroutines.delay
  * - [destructive] = true：标题、图标、确认按钮用 error 色（删除、退出班级、处罚等）。
  * - [countdownSeconds] > 0：「倒数 N 秒后可点」变体，确认按钮显示「确认删除（3）」，倒数到 0 才能点；
  *   旋转屏幕不会重新倒数。
+ * - [content]：正文下方的额外内容（如管理操作必填的「原因」输入框）；配合 [confirmEnabled] 在没填好时禁用确认。
  */
 @Composable
 fun ConfirmDialog(
@@ -35,6 +39,8 @@ fun ConfirmDialog(
     destructive: Boolean = false,
     countdownSeconds: Int = 0,
     icon: ImageVector? = null,
+    confirmEnabled: Boolean = true,
+    content: (@Composable () -> Unit)? = null,
 ) {
     var left by rememberSaveable { mutableIntStateOf(countdownSeconds.coerceAtLeast(0)) }
     LaunchedEffect(Unit) { while (left > 0) { delay(1000); left-- } }
@@ -43,11 +49,14 @@ fun ConfirmDialog(
         onDismissRequest = onDismiss,
         icon = icon?.let { { Icon(it, contentDescription = null, tint = accent) } },
         title = { Text(title, color = if (destructive) accent else MaterialTheme.colorScheme.onSurface) },
-        text = { Text(text) },
+        text = {
+            if (content == null) Text(text)
+            else Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) { Text(text); content() }
+        },
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                enabled = left == 0,
+                enabled = left == 0 && confirmEnabled,
                 shape = Corners.Button,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = accent,

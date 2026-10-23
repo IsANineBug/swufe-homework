@@ -9,6 +9,7 @@ import com.swufe.homework.data.api.Invites
 import com.swufe.homework.data.api.MePatch
 import com.swufe.homework.data.api.userMessage
 import com.swufe.homework.data.repo.AccountRepository
+import com.swufe.homework.data.repo.AiJobTracker
 import com.swufe.homework.data.repo.AuthRepository
 import com.swufe.homework.data.repo.UpdateInfo
 import com.swufe.homework.data.repo.UpdateRepository
@@ -21,6 +22,7 @@ class MeViewModel @Inject constructor(
     private val account: AccountRepository,
     private val auth: AuthRepository,
     private val updates: UpdateRepository,
+    private val aiJobs: AiJobTracker,
 ) : ViewModel() {
     val me = account.me
     var error by mutableStateOf<String?>(null); private set
@@ -30,7 +32,10 @@ class MeViewModel @Inject constructor(
 
     init { refresh() }
 
-    fun refresh() { viewModelScope.launch { account.refreshMe().onFailure { error = it.userMessage } } }
+    fun refresh() {
+        error = null
+        viewModelScope.launch { account.refreshMe().onFailure { error = it.userMessage } }
+    }
 
     fun checkUpdate() {
         checking = true; updateMsg = null
@@ -46,7 +51,7 @@ class MeViewModel @Inject constructor(
     fun skipUpdate() { update?.let { v -> viewModelScope.launch { updates.skip(v.version) } }; update = null }
 
     fun logout(onDone: () -> Unit) {
-        viewModelScope.launch { auth.logout(); account.clear(); onDone() }
+        viewModelScope.launch { auth.logout(); account.clear(); aiJobs.clear(); onDone() }
     }
 }
 
@@ -88,6 +93,7 @@ class InvitesViewModel @Inject constructor(private val account: AccountRepositor
     init { load() }
 
     fun load() {
+        error = null
         viewModelScope.launch {
             account.invites().onSuccess { invites = it }.onFailure { error = it.userMessage }
         }

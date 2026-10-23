@@ -31,24 +31,24 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.swufe.homework.ui.common.BackTopBar
 import com.swufe.homework.ui.common.ErrorText
 import com.swufe.homework.ui.common.FormColumn
 import com.swufe.homework.ui.common.LoadingButton
 import com.swufe.homework.ui.common.PasswordField
+import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.Spacing
 import androidx.activity.compose.BackHandler
 
 @Composable
 fun LoginScreen(onLoggedIn: () -> Unit, onRegister: () -> Unit, onRecover: () -> Unit, vm: LoginViewModel = hiltViewModel()) {
     Scaffold { pad ->
         FormColumn(Modifier.padding(pad).verticalScroll(rememberScrollState()).imePadding()) {
-            Spacer(Modifier.height(48.dp))
+            Spacer(Modifier.height(Spacing.xl * 2))
             Text("西财作业", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
             Text("同学共享作业和 DDL", style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Spacing.xl))
             OutlinedTextField(vm.nickname, { vm.nickname = it }, label = { Text("昵称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             PasswordField(vm.password, { vm.password = it }, "密码")
             ErrorText(vm.error)
@@ -114,7 +114,7 @@ fun RecoveryCodeScreen(
     BackHandler(enabled = true) { /* 未确认前不允许返回 */ }
     Scaffold { pad ->
         FormColumn(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState())) {
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(Spacing.xl))
             Text(if (fromRecover) "密码已重设" else "注册成功", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
                 "这是你的恢复码。忘记密码时只能靠它找回账号，它只显示这一次，App 和服务器都不会再给你看。请抄下来或截图保存到安全的地方。",
@@ -124,13 +124,13 @@ fun RecoveryCodeScreen(
                 Text(
                     code,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 24.sp,
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xl),
                 )
             }
-            OutlinedButton(onClick = { clip.setText(AnnotatedString(code)); copied = true }, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { clip.setText(AnnotatedString(code)); copied = true }, shape = Corners.Button, modifier = Modifier.fillMaxWidth()) {
                 Text(if (copied) "已复制" else "复制恢复码")
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
