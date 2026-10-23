@@ -35,3 +35,8 @@
 | `Publish(classId, assignmentId = -1, sourceId = -1)` | 发布（只有 classId）/ 补充（带 assignmentId）/ 编辑自己的来源（再带 sourceId） |
 | `MyPoints`、`PointsRules` | 我的积分、积分规则 |
 | `ReminderGuide` | 提醒设置引导（首次进入主界面自动打开一次） |
+
+## WS11 新增页面
+| 路由 | 页面 |
+|---|---|
+| `EditAssignment(id)` | 首发者编辑作业（标题、DDL → `PATCH /assignments/{id}`；说明 = 首发来源正文与图片 → `PATCH /sources/{id}`）。入口：作业详情顶栏「编辑」，仅 `Assignment.is_first_poster` 为真时显示 |

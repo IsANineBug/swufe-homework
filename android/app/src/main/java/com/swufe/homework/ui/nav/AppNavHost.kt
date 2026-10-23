@@ -28,6 +28,7 @@ import com.swufe.homework.ui.common.CenterLoading
 import com.swufe.homework.ui.common.UpdateDialog
 import com.swufe.homework.ui.homework.ClassBody
 import com.swufe.homework.ui.homework.DetailScreen
+import com.swufe.homework.ui.homework.EditAssignmentScreen
 import com.swufe.homework.ui.homework.FirstLaunchGuide
 import com.swufe.homework.ui.homework.HomeScreen
 import com.swufe.homework.ui.homework.MyPointsScreen
@@ -166,6 +167,7 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
                 onOpenAssignment = { nav.navigate(Routes.AssignmentDetail(it)) },
                 onSupplement = { c, a -> nav.navigate(Routes.Publish(c, assignmentId = a)) },
                 onEditSource = { c, a, s -> nav.navigate(Routes.Publish(c, assignmentId = a, sourceId = s)) },
+                onEditAssignment = { nav.navigate(Routes.EditAssignment(it)) },
             )
         }
         composable<Routes.Publish> { entry ->
@@ -178,6 +180,10 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
                     else nav.navigate(Routes.AssignmentDetail(id)) { popUpTo<Routes.Publish> { inclusive = true } }
                 },
             )
+        }
+        composable<Routes.EditAssignment> {
+            // 保存后回到详情页（详情页 onResume 会重新加载）
+            EditAssignmentScreen(onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
         }
         composable<Routes.MyPoints> { MyPointsScreen(onBack = { nav.popBackStack() }, onRules = { nav.navigate(Routes.PointsRules) }) }
         composable<Routes.PointsRules> { PointsRulesScreen(onBack = { nav.popBackStack() }) }

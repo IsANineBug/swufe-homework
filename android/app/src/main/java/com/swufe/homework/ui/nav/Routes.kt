@@ -28,6 +28,8 @@ object Routes {
     @Serializable data class AssignmentDetail(val id: Int)
     /** 发布：只给 classId；补充：再给 assignmentId；编辑自己的来源：再给 sourceId。-1 表示无。 */
     @Serializable data class Publish(val classId: Int, val assignmentId: Int = -1, val sourceId: Int = -1)
+    /** WS11：首发者编辑作业（标题、DDL、说明）。 */
+    @Serializable data class EditAssignment(val id: Int)
     @Serializable data object MyPoints
     @Serializable data object PointsRules
     @Serializable data object ReminderGuide
