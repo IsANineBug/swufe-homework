@@ -1,0 +1,36 @@
+{
+  "handled_at": "null",
+  "id": "number",
+  "reporters": [
+    {
+      "created_at": "string",
+      "nickname": "string",
+      "reason": "string"
+    }
+  ],
+  "resolution": "null",
+  "target": {
+    "contribution_total": "number",
+    "created_at": "string",
+    "deleted_content_30d": "number",
+    "disabled": "bool",
+    "id": "number",
+    "inviter_nickname": "string",
+    "nickname": "string",
+    "registered_via": "string",
+    "reports_against_open": "number",
+    "role": "string",
+    "sanctions": [
+      {
+        "ends_at": "string",
+        "id": "number",
+        "kind": "string",
+        "lifted_at": "null",
+        "reason": "string",
+        "starts_at": "string"
+      }
+    ]
+  },
+  "target_id": "number",
+  "target_kind": "string"
+}

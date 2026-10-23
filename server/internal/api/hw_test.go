@@ -1,6 +1,6 @@
 package api_test
 
-// WS2 集成测试：作业、补充、完成状态、查重、同步、积分结算与上限、谢谢、删除投票/禁发/恢复、合并/撤销、
+// WS2 集成测试：作业、补充、完成状态、查重、同步、贡献值结算与上限、谢谢、删除投票/禁发/恢复、合并/撤销、
 // 上传与 /files 签名、榜单、班级合并撤销。需要 TEST_DATABASE_URL。
 
 import (
@@ -179,7 +179,7 @@ func TestAssignmentLifecycle(t *testing.T) {
 	if ids := s.Body["removed_ids"].([]any); len(ids) != 1 || int64(ids[0].(float64)) != aid {
 		t.Fatalf("removed = %s", s.Raw)
 	}
-	// 作者自删：积分作废，不扣分
+	// 作者自删：贡献值作废，不扣分
 	if n := e.scalar(`SELECT count(*) FROM points_ledger WHERE status <> 'void'`); n != 0 {
 		t.Fatalf("points not voided: %d", n)
 	}
@@ -363,7 +363,7 @@ func TestMergeVotesAcceptAndRevert(t *testing.T) {
 		t.Fatalf("sync removed = %s", s.Raw)
 	}
 
-	// 管理员撤销：来源搬回、首发与积分还原、合并补上的完成状态去掉
+	// 管理员撤销：来源搬回、首发与贡献值还原、合并补上的完成状态去掉
 	e.mustCode(e.do("POST", "/admin/merge-proposals/"+i64(pid)+"/revert", e.admin, nil), 204)
 	g = e.do("GET", "/assignments/"+i64(y), b, nil)
 	if int64(g.Body["id"].(float64)) != y || len(g.Body["sources"].([]any)) != 1 || g.Body["sources"].([]any)[0].(map[string]any)["kind"] != "first" {

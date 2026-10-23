@@ -316,7 +316,8 @@ func TestImportLeftClassIsUntouched(t *testing.T) {
 	teacher := "张老师"
 	r := imp(t, pool, b, timetable.SlotInput{Name: "大学物理", Room: "R1", Weekday: 1, Start: 1, End: 2, Teacher: &teacher},
 		slot("大学物理", "R8", 3, 1, 2), slot("大学物理", "R9", 5, 1, 2))
-	if len(r.Skipped) != 1 || r.Skipped[0].ID != cid || len(r.Merged) != 0 || len(r.Joined) != 0 || len(r.Created) != 0 {
+	// issue #8：整组跳过时，同组命中的其他未退班的同名班（other）也进 skipped，App 才能提示
+	if len(r.Skipped) != 2 || r.Skipped[0].ID != cid || r.Skipped[1].ID != other || len(r.Merged) != 0 || len(r.Joined) != 0 || len(r.Created) != 0 {
 		t.Fatalf("r = %+v", r)
 	}
 	var name string

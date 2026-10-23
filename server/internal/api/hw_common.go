@@ -18,15 +18,17 @@ import (
 )
 
 var (
-	errNotMember     = httpx.E(http.StatusForbidden, "not_member", "你不是这个班的成员")
-	errPostBanned    = httpx.E(http.StatusForbidden, "post_banned", "你在这个班暂时被禁止发布")
-	errDailyLimit    = httpx.E(http.StatusTooManyRequests, "daily_limit", "今天在这个班已发布 5 条，明天再来吧")
-	errDDLRequired   = httpx.E(http.StatusBadRequest, "ddl_required", "请填写截止时间")
-	errClassArchived = httpx.E(http.StatusConflict, "class_archived", "该班不属于当前学期，只能查看")
-	errBadAttachment = httpx.E(http.StatusBadRequest, "bad_attachment", "附件无效或已被使用")
-	errAlreadyVoted  = httpx.E(http.StatusConflict, "already_voted", "你已经投过票了")
-	errSelfThanks    = httpx.E(http.StatusConflict, "self_thanks", "不能给自己点谢谢")
-	errSelfVote      = httpx.E(http.StatusConflict, "self_vote", "自己的内容请直接删除")
+	errNotMember  = httpx.E(http.StatusForbidden, "not_member", "你不是这个班的成员")
+	errPostBanned = httpx.E(http.StatusForbidden, "post_banned", "你在这个班暂时被禁止发布")
+	// v2：管理员全站禁发，错误码与单班禁发相同
+	errPostBannedGlobal = httpx.E(http.StatusForbidden, "post_banned", "你已被管理员暂时禁止发布作业，可在「我的」查看原因和到期时间")
+	errDailyLimit       = httpx.E(http.StatusTooManyRequests, "daily_limit", "今天在这个班已发布 5 条，明天再来吧")
+	errDDLRequired      = httpx.E(http.StatusBadRequest, "ddl_required", "请填写截止时间")
+	errClassArchived    = httpx.E(http.StatusConflict, "class_archived", "该班不属于当前学期，只能查看")
+	errBadAttachment    = httpx.E(http.StatusBadRequest, "bad_attachment", "附件无效或已被使用")
+	errAlreadyVoted     = httpx.E(http.StatusConflict, "already_voted", "你已经投过票了")
+	errSelfThanks       = httpx.E(http.StatusConflict, "self_thanks", "不能给自己点谢谢")
+	errSelfVote         = httpx.E(http.StatusConflict, "self_vote", "自己的内容请直接删除")
 )
 
 const (
@@ -55,11 +57,11 @@ type asgRef struct {
 	DDL        time.Time
 	MergedInto *int64
 	Deleted    bool
-	Writable   bool // 班级属于当前未归档学期
+	Writable   bool // 班级属于当前未归档学期且未被管理员隐藏
 }
 
 const asgRefSQL = `SELECT a.id, a.class_id, a.created_by, a.ddl, a.merged_into, a.deleted_at IS NOT NULL,
-	(se.is_current AND NOT se.archived)
+	(se.is_current AND NOT se.archived AND c.hidden_at IS NULL)
 	FROM assignments a JOIN classes c ON c.id = a.class_id JOIN semesters se ON se.id = c.semester_id
 	WHERE a.id = $1`
 
@@ -108,7 +110,7 @@ type srcRef struct {
 
 func loadSrcRef(ctx context.Context, q store.Q, id int64, lock bool) (*srcRef, error) {
 	sql := `SELECT s.id, s.assignment_id, a.class_id, s.author_id, s.kind, s.deleted_at IS NOT NULL, s.deleted_reason,
-		(se.is_current AND NOT se.archived)
+		(se.is_current AND NOT se.archived AND c.hidden_at IS NULL)
 		FROM assignment_sources s JOIN assignments a ON a.id = s.assignment_id
 		JOIN classes c ON c.id = a.class_id JOIN semesters se ON se.id = c.semester_id
 		WHERE s.id = $1`
@@ -139,10 +141,10 @@ func requireMember(ctx context.Context, q store.Q, classID int64, r *http.Reques
 	return nil
 }
 
-// classWritable 班级存在且属于当前未归档学期。
+// classWritable 班级存在、属于当前未归档学期且未被管理员隐藏（v2）。
 func classWritable(ctx context.Context, q store.Q, classID int64) error {
 	var ok bool
-	err := q.QueryRow(ctx, `SELECT se.is_current AND NOT se.archived AND c.merged_into IS NULL
+	err := q.QueryRow(ctx, `SELECT se.is_current AND NOT se.archived AND c.merged_into IS NULL AND c.hidden_at IS NULL
 		FROM classes c JOIN semesters se ON se.id = c.semester_id WHERE c.id = $1`, classID).Scan(&ok)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.ErrNotFound
@@ -156,10 +158,16 @@ func classWritable(ctx context.Context, q store.Q, classID int64) error {
 	return nil
 }
 
-// checkCanPost 禁发与每日 5 条（Asia/Shanghai 日期，被删除的不计）。须在事务内调用，会拿本人发布锁。
+// checkCanPost 禁发（投票触发的单班禁发、v2 管理员全站禁发）与每日 5 条（Asia/Shanghai 日期，被删除的不计）。
+// 须在事务内调用，会拿本人发布锁。
 func checkCanPost(ctx context.Context, tx pgx.Tx, userID, classID int64, now time.Time) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2::int)`, postLockNS, userID); err != nil {
 		return err
+	}
+	if sc, err := activeSanction(ctx, tx, userID, "post_ban", now); err != nil {
+		return err
+	} else if sc != nil {
+		return errPostBannedGlobal
 	}
 	var banned bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM post_bans WHERE user_id = $1 AND class_id = $2
@@ -243,6 +251,19 @@ func softDeleteSource(ctx context.Context, tx pgx.Tx, src *srcRef, reason string
 		return err
 	}
 	return recomputeConflict(ctx, tx, src.AssignmentID)
+}
+
+// hiddenFromUser 班级被管理员隐藏（v2）时，对非管理员按不存在处理（404）；管理员仍可查看。
+func hiddenFromUser(ctx context.Context, q store.Q, classID int64, r *http.Request) error {
+	if currentUser(r).IsAdmin() {
+		return nil
+	}
+	var hidden bool
+	err := q.QueryRow(ctx, `SELECT hidden_at IS NOT NULL FROM classes WHERE id = $1`, classID).Scan(&hidden)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && hidden) {
+		return httpx.ErrNotFound
+	}
+	return err
 }
 
 func notify(ctx context.Context, q store.Q, userID int64, kind string, payload map[string]any) error {

@@ -1,0 +1,20 @@
+{
+  "handled_at": "null",
+  "id": "number",
+  "reporters": [
+    {
+      "created_at": "string",
+      "nickname": "string",
+      "reason": "string"
+    }
+  ],
+  "resolution": "null",
+  "target": {
+    "assignment_count": "number",
+    "created_by_nickname": "string",
+    "member_count": "number",
+    "name": "string"
+  },
+  "target_id": "number",
+  "target_kind": "string"
+}

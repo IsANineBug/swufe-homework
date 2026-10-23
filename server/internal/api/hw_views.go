@@ -39,6 +39,7 @@ type sourceView struct {
 	ID              int64            `json:"id"`
 	Kind            string           `json:"kind"`
 	AuthorNickname  string           `json:"author_nickname"`
+	IsMine          bool             `json:"is_mine"` // v2：按用户 id 判断，不按昵称
 	Body            string           `json:"body"`
 	StatedDDL       *string          `json:"stated_ddl"`
 	Attachments     []attachmentView `json:"attachments"`
@@ -64,6 +65,7 @@ type mergeProposalView struct {
 type assignmentView struct {
 	assignmentSummary
 	FirstPosterNickname string              `json:"first_poster_nickname"`
+	IsFirstPoster       bool                `json:"is_first_poster"` // v2：按用户 id 判断
 	Sources             []sourceView        `json:"sources"`
 	MergedFrom          []int64             `json:"merged_from"`
 	PendingMerges       []mergeProposalView `json:"pending_merges"`
@@ -113,7 +115,7 @@ func (s *Server) loadSources(ctx context.Context, q store.Q, uid int64, where st
 		(SELECT count(*) FROM thanks t WHERE t.source_id = s.id),
 		EXISTS (SELECT 1 FROM thanks t WHERE t.source_id = s.id AND t.user_id = $1),
 		EXISTS (SELECT 1 FROM delete_votes v WHERE v.source_id = s.id AND v.user_id = $1),
-		s.assignment_id, s.deleted_at, s.deleted_reason
+		s.assignment_id, s.deleted_at, s.deleted_reason, s.author_id = $1
 		FROM assignment_sources s JOIN users u ON u.id = s.author_id WHERE `+where, all...)
 	if err != nil {
 		return nil, err
@@ -129,7 +131,7 @@ func (s *Server) loadSources(ctx context.Context, q store.Q, uid int64, where st
 		var delAt *time.Time
 		var delWhy *string
 		if err := rows.Scan(&v.ID, &v.Kind, &v.AuthorNickname, &v.Body, &stated, &created,
-			&v.ThanksCount, &v.ThankedByMe, &v.VotedDeleteByMe, &aid, &delAt, &delWhy); err != nil {
+			&v.ThanksCount, &v.ThankedByMe, &v.VotedDeleteByMe, &aid, &delAt, &delWhy, &v.IsMine); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -204,8 +206,8 @@ func (s *Server) loadAssignmentView(ctx context.Context, q store.Q, uid, id int6
 		return nil, httpx.ErrNotFound
 	}
 	v := &assignmentView{assignmentSummary: sums[0]}
-	if err := q.QueryRow(ctx, `SELECT u.nickname FROM assignments a JOIN users u ON u.id = a.created_by WHERE a.id = $1`, id).
-		Scan(&v.FirstPosterNickname); err != nil {
+	if err := q.QueryRow(ctx, `SELECT u.nickname, a.created_by = $2 FROM assignments a JOIN users u ON u.id = a.created_by WHERE a.id = $1`, id, uid).
+		Scan(&v.FirstPosterNickname, &v.IsFirstPoster); err != nil {
 		return nil, err
 	}
 	if v.Sources, err = s.loadSources(ctx, q, uid, `s.assignment_id = $2 AND s.deleted_at IS NULL ORDER BY (s.kind = 'first') DESC, s.created_at, s.id`, id); err != nil {

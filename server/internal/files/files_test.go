@@ -39,6 +39,26 @@ func TestSignVerify(t *testing.T) {
 	}
 }
 
+// issue #8：同一 10 分钟内生成的链接相同（App 缓存可命中），且不超过 1 小时有效期。
+func TestURLStableWithin10Minutes(t *testing.T) {
+	s := NewSigner(nil, []byte(strings.Repeat("j", 40)), time.Hour)
+	base := time.Unix(1_800_000_000, 0).Truncate(10 * time.Minute)
+	a := s.URL("x/y/z.jpg", base.Add(time.Second))
+	b := s.URL("x/y/z.jpg", base.Add(9*time.Minute+59*time.Second))
+	if a != b {
+		t.Fatalf("url changed within 10 minutes:\n%s\n%s", a, b)
+	}
+	if c := s.URL("x/y/z.jpg", base.Add(10*time.Minute)); c == a {
+		t.Fatal("url should roll over at the next 10-minute boundary")
+	}
+	u, _ := url.Parse(a)
+	exp, _ := strconv.ParseInt(u.Query().Get("exp"), 10, 64)
+	now := base.Add(time.Second)
+	if exp > now.Add(time.Hour).Unix() || exp < now.Add(50*time.Minute).Unix() {
+		t.Fatalf("exp %d out of range", exp)
+	}
+}
+
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func TestValidRel(t *testing.T) {

@@ -524,3 +524,29 @@ func TestConcurrentCreateRespectsLimit(t *testing.T) {
 		t.Fatalf("accepted %d, want 3", ok)
 	}
 }
+
+// issue #8：DDL 带毫秒时提醒文案也能写回（按秒比较）。
+func TestReminderTextWritebackMillisecondDDL(t *testing.T) {
+	e := newEnv(t)
+	uid, _ := e.user("小明")
+	cid := e.class(uid)
+	ddl := time.Now().Add(72 * time.Hour).Truncate(time.Second).Add(437 * time.Millisecond)
+	aid := e.id(`INSERT INTO assignments (class_id, title, ddl, created_by) VALUES ($1, '第三章习题', $2, $3) RETURNING id`, cid, ddl, uid)
+	e.heartbeat()
+	if err := e.srv.AI.RequestReminderTexts(context.Background(), aid); err != nil {
+		t.Fatal(err)
+	}
+	c := e.claim()
+	e.want(c, 200, "")
+	id := itoa(int64(c.Body["id"].(float64)))
+	slot := c.Body["input"].(map[string]any)["slot"].(string)
+	e.want(e.do("POST", "/worker/jobs/"+id+"/result", workerToken, map[string]any{"status": "done",
+		"output": map[string]any{"title": "作业快截止了", "body": "第三章习题"}}), 204, "")
+	var raw []byte
+	_ = e.pool.QueryRow(context.Background(), `SELECT reminder_text FROM assignments WHERE id = $1`, aid).Scan(&raw)
+	var got map[string]map[string]string
+	_ = json.Unmarshal(raw, &got)
+	if got[slot]["title"] != "作业快截止了" {
+		t.Fatalf("reminder_text = %s", raw)
+	}
+}

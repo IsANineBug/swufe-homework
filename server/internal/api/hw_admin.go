@@ -16,7 +16,7 @@ import (
 	"github.com/IsANineBug/swufe-homework/server/internal/points"
 )
 
-// POST /admin/sources/{source_id}/restore 恢复被投票删除的内容，返还积分；lift_ban（默认 true）解除作者在该班的禁发。
+// POST /admin/sources/{source_id}/restore 恢复被投票删除或（v2）管理员删除的内容，返还贡献值；lift_ban（默认 true）解除作者在该班的禁发。
 func (s *Server) adminRestoreSource(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := idParam(r, "source_id")
@@ -35,6 +35,7 @@ func (s *Server) adminRestoreSource(w http.ResponseWriter, r *http.Request) {
 	}
 	lift := in.LiftBan == nil || *in.LiftBan
 	now := s.Now()
+	admin := currentUser(r).ID
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
 		src, err := loadSrcRef(ctx, tx, id, true)
 		if err != nil {
@@ -74,6 +75,11 @@ func (s *Server) adminRestoreSource(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if err := logAdmin(ctx, tx, admin, "source_restore", "source", id, nil, map[string]any{
+			"deleted_reason": *src.DeletedWhy, "lift_ban": lift, "assignment_id": src.AssignmentID,
+		}); err != nil {
+			return err
+		}
 		return notify(ctx, tx, src.AuthorID, "content_restored", map[string]any{"source_id": id, "assignment_id": src.AssignmentID})
 	})
 	if err != nil {
@@ -83,7 +89,7 @@ func (s *Server) adminRestoreSource(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// POST /admin/merge-proposals/{proposal_id}/revert 撤销作业合并：按快照把来源搬回、首发来源与积分还原、去掉合并补上的完成状态。
+// POST /admin/merge-proposals/{proposal_id}/revert 撤销作业合并：按快照把来源搬回、首发来源与贡献值还原、去掉合并补上的完成状态。
 // 目标作业之后又被合并走时需先撤销后一次（409 merge_chain）。
 func (s *Server) adminRevertMerge(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -146,7 +152,7 @@ func (s *Server) adminRevertMerge(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, l := range snap.VoidedLedger {
-			// 来源之后被删除的，积分保持作废
+			// 来源之后被删除的，贡献值保持作废
 			if _, err := tx.Exec(ctx, `UPDATE points_ledger p SET status = $2, class_id = $3 WHERE p.id = $1 AND p.status = 'void'
 				AND EXISTS (SELECT 1 FROM assignment_sources s WHERE s.id = p.source_id AND s.deleted_at IS NULL)`, l.ID, l.Status, from.ClassID); err != nil {
 				return err
@@ -174,8 +180,10 @@ func (s *Server) adminRevertMerge(w http.ResponseWriter, r *http.Request) {
 		if err := recomputeConflict(ctx, tx, to.ID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE merge_proposals SET status = 'reverted', reverted_by = $2 WHERE id = $1`, pid, admin)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE merge_proposals SET status = 'reverted', reverted_by = $2 WHERE id = $1`, pid, admin); err != nil {
+			return err
+		}
+		return logAdmin(ctx, tx, admin, "merge_revert", "merge_proposal", pid, nil, map[string]any{"from_id": fromID, "to_id": toID})
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -184,10 +192,10 @@ func (s *Server) adminRevertMerge(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /admin/deleted 最近 30 天被投票删除的来源（最多 200 条），供复核。
+// GET /admin/deleted 最近 30 天被投票删除或（v2）管理员删除的来源（最多 200 条），供复核。
 func (s *Server) adminDeleted(w http.ResponseWriter, r *http.Request) {
 	out, err := s.loadSources(r.Context(), s.DB, currentUser(r).ID,
-		`s.deleted_reason = 'vote' AND s.deleted_at > $2 ORDER BY s.deleted_at DESC LIMIT 200`, s.Now().Add(-30*24*time.Hour))
+		`s.deleted_reason IN ('vote', 'admin') AND s.deleted_at > $2 ORDER BY s.deleted_at DESC LIMIT 200`, s.Now().Add(-30*24*time.Hour))
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -224,8 +232,11 @@ func (s *Server) adminAnnounce(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"announcement_id": id, "title": in.Title, "body": in.Body, "effective_at": httpx.Time(*in.EffectiveAt)})
-		_, err := tx.Exec(ctx, `INSERT INTO notices (user_id, kind, payload) SELECT id, 'announcement', $1 FROM users WHERE disabled_at IS NULL`, payload)
-		return err
+		if _, err := tx.Exec(ctx, `INSERT INTO notices (user_id, kind, payload) SELECT id, 'announcement', $1 FROM users WHERE disabled_at IS NULL`, payload); err != nil {
+			return err
+		}
+		return logAdmin(ctx, tx, currentUser(r).ID, "announcement_create", "announcement", id, nil,
+			map[string]any{"title": in.Title, "effective_at": httpx.Time(*in.EffectiveAt)})
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -292,7 +303,7 @@ type memberRecord struct {
 	LeftAt   *time.Time `json:"left_at"`
 }
 
-// POST /admin/class-merges/{merge_id}/revert 撤销班级自动合并：按 class_merges 快照把时段、作业、积分流水、
+// POST /admin/class-merges/{merge_id}/revert 撤销班级自动合并：按 class_merges 快照把时段、作业、贡献值流水、
 // 禁发记录、子合并班搬回 from，恢复双方成员与 into 的课名/教师。into 之后又被合并走时需先撤销后一次（409 merge_chain）。
 func (s *Server) adminRevertClassMerge(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -384,8 +395,11 @@ func (s *Server) adminRevertClassMerge(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `UPDATE assignments SET updated_at = now() WHERE class_id IN ($1, $2)`, fromID, intoID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE class_merges SET undone_at = now(), undone_by = $2 WHERE id = $1`, mid, admin)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE class_merges SET undone_at = now(), undone_by = $2 WHERE id = $1`, mid, admin); err != nil {
+			return err
+		}
+		return logAdmin(ctx, tx, admin, "class_merge_revert", "class_merge", mid, nil,
+			map[string]any{"from_class_id": fromID, "into_class_id": intoID})
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)

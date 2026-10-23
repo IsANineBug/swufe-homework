@@ -19,6 +19,10 @@ import (
 )
 
 // pinnedTLS 服务器是自签证书：不走 CA 校验，改为比对叶子证书公钥（SPKI）的 sha256。
+//
+// 注意（issue #8）：VerifyPeerCertificate 在 TLS 会话复用（session resumption）时不会被调用。
+// 现在没有设置 ClientSessionCache，每次握手都是完整握手，固定校验总会执行；
+// 以后若开启会话复用，须把这段校验改到 VerifyConnection（复用时也会调用），否则固定校验会被绕过。
 func pinnedTLS(pins []string) *tls.Config {
 	want := map[string]bool{}
 	for _, p := range pins {

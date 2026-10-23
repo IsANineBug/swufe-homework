@@ -1,4 +1,4 @@
-// Package points 积分规则（docs/points-rules.md）：流水写入、24h 结算、每日上限、删除收回与恢复返还。
+// Package points 贡献值规则（代码与表名沿用 points）（docs/points-rules.md）：流水写入、24h 结算、每日上限、删除收回与恢复返还。
 // 所有会改变某人当日已得分的操作都先拿该用户的事务级 advisory 锁，避免并发越过每日上限。
 package points
 
@@ -60,17 +60,21 @@ func CapThanks(sum int) int {
 	return Thanks
 }
 
-// Lock 拿 userID 的积分锁（事务结束自动释放）。
+// Lock 拿 userID 的贡献值锁（事务结束自动释放）。
 func Lock(ctx context.Context, tx pgx.Tx, userID int64) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2::int)`, lockNamespace, userID)
 	return err
 }
 
-// earnedOn 某人某天已 settled 的正分。
+// CapReasons 计入每日 30 分上限的流水（正分）。恢复返还的 10 分（restore_refund）和管理员调整（admin_adjust）
+// 不计入（issue #8、v2）；/me/points 的 today_earned 用同一口径。
+const CapReasons = `('first_post','supplement','thanks','merge_adjust')`
+
+// earnedOn 某人某天已 settled、计入上限的正分。
 func earnedOn(ctx context.Context, tx pgx.Tx, userID int64, day time.Time) (int, error) {
 	var n int
 	err := tx.QueryRow(ctx, `SELECT coalesce(sum(delta), 0) FROM points_ledger
-		WHERE user_id = $1 AND local_day = $2 AND status = 'settled' AND delta > 0`, userID, day).Scan(&n)
+		WHERE user_id = $1 AND local_day = $2 AND status = 'settled' AND delta > 0 AND reason IN `+CapReasons, userID, day).Scan(&n)
 	return n, err
 }
 
@@ -199,11 +203,46 @@ func RevokeForDeletion(ctx context.Context, tx pgx.Tx, authorID, classID, source
 }
 
 // RestoreForUndelete 管理员恢复：作废的正分流水恢复（未到结算时间的回到 pending），扣分写 restore_refund 返还。
-// 同一来源多次删除/恢复时，restore_refund 条数不超过 deleted_penalty 条数。
+// 已过结算时间的流水重新按其结算日的每日上限截断（issue #8：删除期间当天可能已被别的得分占满）。
+// 同一来源多次删除/恢复时，restore_refund 条数不超过 deleted_penalty 条数。调用方须已拿 Lock(authorID)。
 func RestoreForUndelete(ctx context.Context, tx pgx.Tx, authorID, classID, sourceID int64, now time.Time) error {
-	if _, err := tx.Exec(ctx, `UPDATE points_ledger SET status = CASE WHEN settle_at <= $2 THEN 'settled' ELSE 'pending' END
-		WHERE source_id = $1 AND status = 'void' AND reason IN ('first_post','supplement','thanks')`, sourceID, now); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE points_ledger SET status = 'pending'
+		WHERE source_id = $1 AND status = 'void' AND settle_at > $2 AND reason IN ('first_post','supplement','thanks')`, sourceID, now); err != nil {
 		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT id, delta, local_day FROM points_ledger
+		WHERE source_id = $1 AND status = 'void' AND settle_at <= $2 AND reason IN ('first_post','supplement','thanks')
+		ORDER BY settle_at, id`, sourceID, now)
+	if err != nil {
+		return err
+	}
+	type item struct {
+		id    int64
+		delta int
+		day   time.Time
+	}
+	var items []item
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.id, &it.delta, &it.day); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, it)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, it := range items {
+		earned, err := earnedOn(ctx, tx, authorID, it.day)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE points_ledger SET status = 'settled', delta = $2 WHERE id = $1`,
+			it.id, CapDaily(earned, it.delta)); err != nil {
+			return err
+		}
 	}
 	var penalties, refunds int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE reason = 'deleted_penalty'), count(*) FILTER (WHERE reason = 'restore_refund')
@@ -213,9 +252,21 @@ func RestoreForUndelete(ctx context.Context, tx pgx.Tx, authorID, classID, sourc
 	if penalties <= refunds {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO points_ledger (user_id, class_id, semester_id, source_id, reason, delta, status, settle_at, local_day, created_at)
+	_, err = tx.Exec(ctx, `INSERT INTO points_ledger (user_id, class_id, semester_id, source_id, reason, delta, status, settle_at, local_day, created_at)
 		SELECT $1, c.id, c.semester_id, $3, 'restore_refund', $4, 'settled', $5, $6, $5 FROM classes c WHERE c.id = $2`,
 		authorID, classID, sourceID, DeletePenalty, now, LocalDay(now))
+	return err
+}
+
+// AdminAdjust 管理员调整贡献值（v2）：reason=admin_adjust、立即 settled、note 记原因（本人在明细里可见），
+// 不受每日上限影响，也不计入上限。
+func AdminAdjust(ctx context.Context, tx pgx.Tx, userID, classID int64, delta int, note string, now time.Time) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO points_ledger (user_id, class_id, semester_id, source_id, reason, delta, status, settle_at, local_day, created_at, note)
+		SELECT $1, c.id, c.semester_id, NULL, 'admin_adjust', $3, 'settled', $4, $5, $4, $6 FROM classes c WHERE c.id = $2`,
+		userID, classID, delta, now, LocalDay(now), note)
+	if err == nil && tag.RowsAffected() == 0 {
+		err = pgx.ErrNoRows
+	}
 	return err
 }
 

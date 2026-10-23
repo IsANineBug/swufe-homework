@@ -1,6 +1,6 @@
 package api
 
-// WS2 社区：谢谢、删除投票（含禁发与邀请人提醒）、合并提议/同意/赞同/执行、榜单、我的积分。
+// WS2 社区：谢谢、删除投票（含禁发与邀请人提醒）、合并提议/同意/赞同/执行、榜单、我的贡献值。
 
 import (
 	"context"
@@ -70,7 +70,7 @@ func (s *Server) thankSource(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /sources/{source_id}/delete-votes 达到 clamp(ceil(成员数×10%),3,6) 即软删除：
-// 收回积分并 -10；30 天内第 3 次被删 → 该班禁发 7 天；作者为邀请注册时提醒直接邀请人。
+// 收回贡献值并 -10；30 天内第 3 次被删 → 该班禁发 7 天；作者为邀请注册时提醒直接邀请人。
 func (s *Server) voteDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := idParam(r, "source_id")
@@ -121,7 +121,7 @@ func (s *Server) voteDelete(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		out.Deleted = true
-		return s.deleteByVote(ctx, tx, src, now)
+		return s.deleteModerated(ctx, tx, src, now, "vote", true, nil)
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -130,17 +130,24 @@ func (s *Server) voteDelete(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-func (s *Server) deleteByVote(ctx context.Context, tx pgx.Tx, src *srcRef, now time.Time) error {
+// deleteModerated 投票删除（why=vote）或管理员删除（why=admin，v2）一条来源：软删除，作业无剩余来源时随之删除。
+// penalize=true：收回该来源贡献值并 -10、计入 30 天禁发次数（满 3 次该班禁发 7 天）、通知邀请人；
+// penalize=false（仅管理员删除可选）：只收回不罚。作者都收到 content_deleted 通知（管理员删除时含 reason）。
+func (s *Server) deleteModerated(ctx context.Context, tx pgx.Tx, src *srcRef, now time.Time, why string, penalize bool, reason *string) error {
 	if _, err := loadAsgRef(ctx, tx, src.AssignmentID, true); err != nil {
 		return err
 	}
-	if err := softDeleteSource(ctx, tx, src, "vote"); err != nil {
+	if err := softDeleteSource(ctx, tx, src, why); err != nil {
 		return err
 	}
 	if err := points.Lock(ctx, tx, src.AuthorID); err != nil {
 		return err
 	}
-	if err := points.RevokeForDeletion(ctx, tx, src.AuthorID, src.ClassID, src.ID, now); err != nil {
+	if penalize {
+		if err := points.RevokeForDeletion(ctx, tx, src.AuthorID, src.ClassID, src.ID, now); err != nil {
+			return err
+		}
+	} else if err := points.VoidSource(ctx, tx, src.ID); err != nil {
 		return err
 	}
 	var title string
@@ -148,13 +155,23 @@ func (s *Server) deleteByVote(ctx context.Context, tx pgx.Tx, src *srcRef, now t
 		return err
 	}
 	payload := map[string]any{"source_id": src.ID, "assignment_id": src.AssignmentID, "class_id": src.ClassID, "title": title}
+	if reason != nil {
+		payload["reason"] = *reason
+	}
 	if err := notify(ctx, tx, src.AuthorID, "content_deleted", payload); err != nil {
 		return err
 	}
-	// 30 天内被投票删除次数（含本次），按作业当前所在班级统计
+	if !penalize {
+		return nil
+	}
+	// 30 天内被删除且受罚的次数（含本次），按作业当前所在班级统计：投票删除，以及 penalize=true 的管理员删除
+	// （仍处于删除状态且扣分未被返还，即 deleted_penalty 条数多于 restore_refund）
 	var strikes int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM assignment_sources s JOIN assignments a ON a.id = s.assignment_id
-		WHERE s.author_id = $1 AND a.class_id = $2 AND s.deleted_reason = 'vote' AND s.deleted_at > $3`,
+		WHERE s.author_id = $1 AND a.class_id = $2 AND s.deleted_at > $3
+		  AND (s.deleted_reason = 'vote' OR (s.deleted_reason = 'admin' AND
+		       (SELECT count(*) FILTER (WHERE p.reason = 'deleted_penalty') - count(*) FILTER (WHERE p.reason = 'restore_refund')
+		        FROM points_ledger p WHERE p.source_id = s.id AND p.status = 'settled') > 0))`,
 		src.AuthorID, src.ClassID, now.Add(-banWindow)).Scan(&strikes); err != nil {
 		return err
 	}
@@ -525,12 +542,12 @@ func (s *Server) applyMerge(ctx context.Context, tx pgx.Tx, pid int64, from, to 
 	return notify(ctx, tx, from.CreatedBy, "merge_applied", map[string]any{"proposal_id": pid, "from_id": from.ID, "to_id": to.ID})
 }
 
-// ---------- 榜单与积分 ----------
+// ---------- 榜单与贡献值 ----------
 
 const anonymousName = "匿名同学"
 
 // GET /classes/{class_id}/leaderboard?scope=week|semester
-// 周榜：本周一 00:00（Asia/Shanghai）起的已结算积分；学期榜：本班（班级即属于某学期）全部已结算积分。
+// 周榜：本周一 00:00（Asia/Shanghai）起的已结算贡献值；学期榜：本班（班级即属于某学期）全部已结算贡献值。
 // 课代表 = 学期榜第一（> 0 分），同分取先达到该分数者。前 100 名，另附本人行（若不在前 100）。
 func (s *Server) leaderboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -548,6 +565,9 @@ func (s *Server) leaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		err = requireMember(ctx, s.DB, cid, r, true)
+	}
+	if err == nil {
+		err = hiddenFromUser(ctx, s.DB, cid, r)
 	}
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -603,7 +623,7 @@ func (s *Server) leaderboard(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"rep": rep, "rows": out})
 }
 
-// classRep 课代表：学期积分最高（> 0），同分取累计达到该分数最早者。
+// classRep 课代表：学期贡献值最高（> 0），同分取累计达到该分数最早者。
 func classRep(ctx context.Context, q store.Q, classID int64) (map[string]string, error) {
 	var nick string
 	var anon bool
@@ -635,7 +655,7 @@ func WeekStart(now time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day()-d, 0, 0, 0, 0, httpx.Shanghai)
 }
 
-// GET /me/points?cursor= 积分明细（新到旧，每页 50）与汇总。
+// GET /me/points?cursor= 贡献值明细（新到旧，每页 50）与汇总。
 func (s *Server) myPoints(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uid := currentUser(r).ID
@@ -652,14 +672,15 @@ func (s *Server) myPoints(w http.ResponseWriter, r *http.Request) {
 	err := s.DB.QueryRow(ctx, `SELECT
 		coalesce((SELECT sum(p.delta) FROM points_ledger p JOIN semesters se ON se.id = p.semester_id AND se.is_current
 			WHERE p.user_id = $1 AND p.status = 'settled'), 0),
-		coalesce((SELECT sum(delta) FROM points_ledger WHERE user_id = $1 AND status = 'settled' AND delta > 0 AND local_day = $2), 0)`,
+		coalesce((SELECT sum(delta) FROM points_ledger WHERE user_id = $1 AND status = 'settled' AND delta > 0 AND local_day = $2
+			AND reason IN `+points.CapReasons+`), 0)`,
 		uid, points.LocalDay(s.Now())).Scan(&semTotal, &today)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	const page = 50
-	rows, err := s.DB.Query(ctx, `SELECT p.id, p.delta, p.reason, p.status, c.name, a.title, p.created_at
+	rows, err := s.DB.Query(ctx, `SELECT p.id, p.delta, p.reason, p.note, p.status, c.name, a.title, p.created_at
 		FROM points_ledger p JOIN classes c ON c.id = p.class_id
 		LEFT JOIN assignment_sources s ON s.id = p.source_id LEFT JOIN assignments a ON a.id = s.assignment_id
 		WHERE p.user_id = $1 AND p.id < $2 ORDER BY p.id DESC LIMIT $3`, uid, cursor, page+1)
@@ -671,6 +692,7 @@ func (s *Server) myPoints(w http.ResponseWriter, r *http.Request) {
 	type entry struct {
 		Delta           int     `json:"delta"`
 		Reason          string  `json:"reason"`
+		Note            *string `json:"note"` // v2：admin_adjust 的原因
 		Status          string  `json:"status"`
 		ClassName       string  `json:"class_name"`
 		AssignmentTitle *string `json:"assignment_title"`
@@ -683,7 +705,7 @@ func (s *Server) myPoints(w http.ResponseWriter, r *http.Request) {
 		var e entry
 		var id int64
 		var at time.Time
-		if err := rows.Scan(&id, &e.Delta, &e.Reason, &e.Status, &e.ClassName, &e.AssignmentTitle, &at); err != nil {
+		if err := rows.Scan(&id, &e.Delta, &e.Reason, &e.Note, &e.Status, &e.ClassName, &e.AssignmentTitle, &at); err != nil {
 			httpx.Fail(w, r, err)
 			return
 		}

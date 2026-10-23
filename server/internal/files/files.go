@@ -43,9 +43,11 @@ func (s *Signer) mac(rel string, exp int64) string {
 
 // URL 生成相对服务器根的签名地址（App 用服务器 origin 拼接）。过期时间取整到 10 分钟，便于 nginx/App 缓存。
 func (s *Signer) URL(rel string, now time.Time) string {
-	exp := now.Add(s.ttl).Truncate(10 * time.Minute).Add(10 * time.Minute).Unix()
-	if max := now.Add(s.ttl).Unix(); exp > max {
-		exp = max
+	// 向下取整到 10 分钟（issue #8）：同一 10 分钟内生成的链接完全相同，App 图片缓存可命中；
+	// 实际有效期在 ttl−10 分钟到 ttl 之间。ttl 不足 20 分钟时不取整，避免链接几乎立即过期。
+	exp := now.Add(s.ttl).Unix()
+	if s.ttl >= 20*time.Minute {
+		exp = now.Add(s.ttl).Truncate(10 * time.Minute).Unix()
 	}
 	esc := (&url.URL{Path: rel}).EscapedPath()
 	return "/files/" + esc + "?exp=" + strconv.FormatInt(exp, 10) + "&sig=" + s.mac(rel, exp)

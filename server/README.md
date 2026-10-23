@@ -13,10 +13,10 @@ internal/auth        argon2id、恢复码、邀请码、JWT、refresh token
 internal/netx        客户端 IP（只信任 TRUSTED_PROXY 的 X-Real-IP）、校园网判断、限流
 internal/store       公共查询（当前学期、班级装载、成员校验、迁移、连接池）
 internal/timetable   课表规范化与自动归班算法
-internal/api         HTTP 路由与处理器（WS1：账号与班级；WS2：hw_*.go 作业、社区、积分、上传、管理员）
-internal/points      积分规则：流水、24h 结算、每日 30 分上限、删除收回/恢复返还、删除门槛（WS2）
+internal/api         HTTP 路由与处理器（WS1：账号与班级；WS2：hw_*.go 作业、社区、贡献值、上传、管理员）
+internal/points      贡献值规则：流水、24h 结算、每日 30 分上限、删除收回/恢复返还、删除门槛（WS2）
 internal/files       上传路径校验与 /files 过期签名 URL（WS2）
-internal/jobs        同进程定时任务：积分结算、合并提议过期、token 清理、图片清理（WS2）
+internal/jobs        同进程定时任务：贡献值结算、合并提议过期、token 清理、图片清理（WS2）
 internal/ai          AI 任务：/ai/*（App）与 /worker/*（电脑端 worker），见 docs/ai-contract.md（WS3）
 internal/testdb      集成测试用数据库
 ```
@@ -114,25 +114,45 @@ TEST_DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/hwtest?sslmode=disable
 | `GET/PATCH /api/v1/assignments/{id}` | 详情（已合并返回目标）；首发者改标题 / DDL |
 | `POST /api/v1/assignments/{id}/sources` | 补充（+3 pending），DDL 不一致标红 |
 | `PUT/DELETE /api/v1/assignments/{id}/done` | 完成状态，仅本人可见 |
-| `PATCH/DELETE /api/v1/sources/{id}` | 作者编辑 / 删除（删除不扣分，积分作废） |
+| `PATCH/DELETE /api/v1/sources/{id}` | 作者编辑 / 删除（删除不扣分，贡献值作废） |
 | `POST /api/v1/uploads` | 上传 jpeg/png/webp/pdf ≤10MB，图片生成 400px 缩略图 |
 | `GET /files/<路径>?exp=&sig=` | 验签后 `X-Accel-Redirect: /_protected/…` |
 | `POST /api/v1/sources/{id}/thanks` | 谢谢 +1（每条 ≤10） |
 | `POST /api/v1/sources/{id}/delete-votes` | 删除投票，门槛 clamp(ceil(成员×10%),3,6)，扣分、禁发、提醒邀请人 |
 | `POST /api/v1/merge-proposals`、`/{id}/accept`、`/{id}/votes` | 合并提议、首发者同意、3 人赞同 |
-| `GET /api/v1/me/points?cursor=` | 积分明细与汇总 |
-| `POST /api/v1/admin/sources/{id}/restore` | 恢复误删、返还积分、解除禁发 |
+| `GET /api/v1/me/points?cursor=` | 贡献值明细与汇总 |
+| `POST /api/v1/admin/sources/{id}/restore` | 恢复误删、返还贡献值、解除禁发 |
 | `POST /api/v1/admin/merge-proposals/{id}/revert` | 撤销作业合并 |
 | `GET /api/v1/admin/class-merges`、`POST …/{id}/revert` | 班级自动合并复核与撤销 |
-| `GET /api/v1/admin/deleted` | 最近 30 天被投票删除的内容 |
+| `GET /api/v1/admin/deleted` | 最近 30 天被投票删除或（v2）管理员删除的内容 |
 | `POST /api/v1/admin/announcements` | 规则公告（生效 ≥7 天后），同时发通知 |
 
-定时任务（同进程）：每 10 分钟积分结算；每小时合并提议 7 天过期、清理过期或撤销超 1 天的 refresh token；
+定时任务（同进程）：每 10 分钟贡献值结算；每小时合并提议 7 天过期、清理过期或撤销超 1 天的 refresh token；
 每 6 小时清理早于上一学期的附件文件（标记 `purged_at`）和上传后 24 小时未发布的附件。
 
-## 积分实现要点（docs/points-rules.md）
+## 已实现接口（WS8，v2）
+| 接口 | 说明 |
+|---|---|
+| `GET/POST /api/v1/classes/{id}/messages` | 班级频道：仅在班成员（管理员也不例外）；`after_id` 轮询、`before_id` 翻页；纯文字 1–300 字；每人每 10 秒 1 条、每小时 30 条（所有班合计，429 + Retry-After）；禁言 403 `muted`；隐藏班 409 `class_archived` |
+| `DELETE /api/v1/messages/{id}` | 作者删除自己的消息 |
+| `POST /api/v1/reports` | 举报来源 / 消息 / 班级 / 用户；须可见；未处理去重 409；每人每天 20 条 |
+| `GET /api/v1/admin/reports`、`POST …/{id}/resolve` | 举报列表（同一对象合并一行，消息附前后各 5 条）与处理 |
+| `GET /api/v1/admin/classes`、`PATCH …/{id}`、`POST …/{id}/hide`、`…/unhide`、`POST …/merge` | 班级清理：列表（suspicious 过滤）、改名、隐藏 / 恢复、手动合并（可用 class-merges revert 撤销） |
+| `DELETE /api/v1/admin/sources/{id}` | 直接删除来源（`penalize` 默认 true：收回并 -10、计入禁发次数） |
+| `DELETE /api/v1/admin/messages/{id}` | 删除频道消息 |
+| `GET /api/v1/admin/users?q=`、`GET/PATCH …/{id}` | 用户（只含 AdminUser 字段）、强制改昵称 |
+| `POST /api/v1/admin/users/{id}/sanctions`、`POST /api/v1/admin/sanctions/{id}/lift` | 禁言 / 全站禁发 / 封号（封号作废 refresh token，登录、续期与现有 access token 都 403 `account_disabled`）与解除 |
+| `POST /api/v1/admin/users/{id}/points` | 调整贡献值（`admin_adjust`，不计每日上限，明细可见原因） |
+| `GET /api/v1/admin/actions` | 管理员操作日志（所有 /admin 写操作同一事务记一行） |
+
+另：`/me` 返回 `restrictions`；`/me/classes` 返回 `last_message_id`；作业详情 `is_first_poster`、来源 `is_mine`、贡献值明细 `note`。
+被隐藏的班：`/me/classes`、`/classes/search`、导入归班、`/feed`、`/sync`（作业进 `removed_ids`）都看不到，成员收 `class_hidden` 通知。
+
+定时任务（v2 新增）：每分钟把到期的有期限封号解封；每天 04:00（Asia/Shanghai）硬删 30 天前的频道消息及每班超出最近 500 条的部分。
+
+## 贡献值实现要点（docs/points-rules.md）
 - 首发 / 补充写 `pending`，`settle_at = 发布 + 24h`；到点时来源仍在则 `settled`，按结算日（Asia/Shanghai）已得正分截断到每日 30 分，来源已删则 `void`。
-- 谢谢立即 `settled`，每条来源谢谢分 ≤10，同样受每日上限；同一用户的积分写入都先拿 `pg_advisory_xact_lock(2, user_id)`，防并发越过上限。
+- 谢谢立即 `settled`，每条来源谢谢分 ≤10，同样受每日上限；同一用户的贡献值写入都先拿 `pg_advisory_xact_lock(2, user_id)`，防并发越过上限。
 - 投票删除：正分流水 `void`，写 `deleted_revoke`（0 分）与 `deleted_penalty`（-10）；管理员恢复时 `void` 改回（未到 24h 的回 `pending`），写 `restore_refund` +10。
 - 合并：from 的首发来源改为补充，`first_post` 作废，有新内容（正文非空或有附件）改记 `supplement` +3，状态沿用原流水；撤销按快照还原。
 
@@ -140,7 +160,7 @@ TEST_DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/hwtest?sslmode=disable
 1. 本次提交里同名的时段合成一组（课名比较忽略空格、全半角、大小写）。标了 `truncated` 的课名是唯一一个完整课名的前缀时并入该组；能匹配多个不同完整课名时不自动归组，单独成组。
 2. 每组逐个时段查「同学期 + 同教室 + 同星期 + 节次区间重叠」的已有班：
    - 课名相同 → 命中；课名不同 → 进 `conflicts`，**整组不入库**；
-   - 无命中 → 新建班；命中 1 个 → 加入；命中多个 → 并到最早创建的班（成员、时段、作业、积分流水、禁发记录一起搬，旧班 `merged_into`）；
+   - 无命中 → 新建班；命中 1 个 → 加入；命中多个 → 并到最早创建的班（成员、时段、作业、贡献值流水、禁发记录一起搬，旧班 `merged_into`）；
    - 截断课名的组只能加入唯一一个同名班：命中多个不同名的班时不合并，整组进 `conflicts`；
    - 每次合并在 `class_merges` 记下搬动的行和合并前状态，供管理员撤销（撤销接口归 WS2）。
 3. 补全该班缺的时段；截断课名遇到完整课名时回填；教师选填，只补空值。

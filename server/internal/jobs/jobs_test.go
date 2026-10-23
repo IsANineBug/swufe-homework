@@ -40,7 +40,7 @@ func TestJobs(t *testing.T) {
 	exec(`INSERT INTO assignment_sources (assignment_id, original_assignment_id, author_id, kind) VALUES (1, 1, $1, 'first'), (2, 2, $1, 'first')`, uid)
 	exec(`UPDATE assignment_sources SET deleted_at = now(), deleted_reason = 'author' WHERE id = 2`)
 
-	// 积分：到期的在世来源 → settled；来源已删 → void；未到期保持 pending
+	// 贡献值：到期的在世来源 → settled；来源已删 → void；未到期保持 pending
 	exec(`INSERT INTO points_ledger (user_id, class_id, semester_id, source_id, reason, delta, status, settle_at, local_day) VALUES
 		($1, 1, 1, 1, 'first_post', 10, 'pending', $2, current_date),
 		($1, 1, 1, 2, 'first_post', 10, 'pending', $2, current_date),
@@ -103,6 +103,22 @@ func TestJobs(t *testing.T) {
 		_, err := os.Stat(filepath.Join(dir, f))
 		if (err == nil) != want {
 			t.Errorf("%s exists=%v want %v", f, err == nil, want)
+		}
+	}
+}
+
+func TestNextDailyRun(t *testing.T) {
+	sh := time.FixedZone("CST", 8*3600)
+	cases := []struct{ now, want string }{
+		{"2026-10-23T03:59:59+08:00", "2026-10-23T04:00:00+08:00"},
+		{"2026-10-23T04:00:00+08:00", "2026-10-24T04:00:00+08:00"},
+		{"2026-10-23T19:00:00Z", "2026-10-24T04:00:00+08:00"}, // UTC 19:00 = 上海次日 03:00
+	}
+	for _, c := range cases {
+		now, _ := time.Parse(time.RFC3339, c.now)
+		want, _ := time.Parse(time.RFC3339, c.want)
+		if got := jobs.NextDailyRun(now, 4); !got.Equal(want) {
+			t.Errorf("NextDailyRun(%s) = %s, want %s", c.now, got.In(sh), want.In(sh))
 		}
 	}
 }

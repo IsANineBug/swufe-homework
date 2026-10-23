@@ -31,6 +31,9 @@ func (s *Server) listClassAssignments(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = requireMember(ctx, s.DB, cid, r, true)
 	}
+	if err == nil {
+		err = hiddenFromUser(ctx, s.DB, cid, r)
+	}
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -92,7 +95,7 @@ func checkBody(b string) error {
 	return nil
 }
 
-// POST /classes/{class_id}/assignments 首发：作业 + 首发来源 + 附件 + 首发积分（pending 24h）。
+// POST /classes/{class_id}/assignments 首发：作业 + 首发来源 + 附件 + 首发贡献值（pending 24h）。
 func (s *Server) createAssignment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in assignmentCreate
@@ -186,6 +189,9 @@ func (s *Server) assignmentCandidates(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = requireMember(ctx, s.DB, cid, r, false)
 	}
+	if err == nil {
+		err = hiddenFromUser(ctx, s.DB, cid, r)
+	}
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -275,8 +281,13 @@ func TitleSimilarity(a, b string) float64 {
 	return 2 * float64(inter) / float64(na+nb)
 }
 
-// myClassesCond 当前用户在当前学期在班的班级（$1 = 用户 id）。
+// myClassesCond 当前用户在当前学期在班、未被管理员隐藏的班级（$1 = 用户 id）。
 const myClassesCond = `a.class_id IN (SELECT m.class_id FROM class_members m
+	JOIN classes mc ON mc.id = m.class_id JOIN semesters se ON se.id = mc.semester_id AND se.is_current
+	WHERE m.user_id = $1 AND m.left_at IS NULL AND mc.merged_into IS NULL AND mc.hidden_at IS NULL)`
+
+// myClassesInclHiddenCond 同上但含被隐藏的班：/sync 据此把隐藏班的作业放进 removed_ids。
+const myClassesInclHiddenCond = `a.class_id IN (SELECT m.class_id FROM class_members m
 	JOIN classes mc ON mc.id = m.class_id JOIN semesters se ON se.id = mc.semester_id AND se.is_current
 	WHERE m.user_id = $1 AND m.left_at IS NULL AND mc.merged_into IS NULL)`
 
@@ -308,6 +319,10 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("since"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
+			// issue #8：未做 URL 编码时 +08:00 的加号会被解成空格，这里还原后再解析一次
+			t, err = time.Parse(time.RFC3339, strings.Replace(v, " ", "+", 1))
+		}
+		if err != nil {
 			httpx.Fail(w, r, httpx.ErrBadRequest)
 			return
 		}
@@ -325,8 +340,11 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 			ORDER BY a.ddl, a.id LIMIT 1000`, uid, *since)
 		if err == nil {
 			var rows pgx.Rows
-			rows, err = s.DB.Query(ctx, `SELECT a.id FROM assignments a WHERE `+myClassesCond+`
-				AND (a.deleted_at IS NOT NULL OR a.merged_into IS NOT NULL) AND a.updated_at > $2 ORDER BY a.id LIMIT 1000`, uid, *since)
+			// 被删除、被合并走、或所在班被管理员隐藏（v2）的作业
+			rows, err = s.DB.Query(ctx, `SELECT a.id FROM assignments a JOIN classes c ON c.id = a.class_id
+				WHERE `+myClassesInclHiddenCond+`
+				AND (a.deleted_at IS NOT NULL OR a.merged_into IS NOT NULL OR c.hidden_at IS NOT NULL) AND a.updated_at > $2
+				ORDER BY a.id LIMIT 1000`, uid, *since)
 			if err == nil {
 				removed, err = pgx.CollectRows(rows, pgx.RowTo[int64])
 				if removed == nil {
@@ -358,6 +376,9 @@ func (s *Server) getAssignment(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = requireMember(ctx, s.DB, a.ClassID, r, true)
 	}
+	if err == nil {
+		err = hiddenFromUser(ctx, s.DB, a.ClassID, r)
+	}
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -370,7 +391,8 @@ func (s *Server) getAssignment(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, v)
 }
 
-// PATCH /assignments/{assignment_id} 首发者修改标题/DDL。改 DDL 同步首发来源的 stated_ddl、重算标红、清空旧提醒文案。
+// PATCH /assignments/{assignment_id} 首发者修改标题/DDL。改 DDL 同步首发来源的 stated_ddl、重算标红；
+// 改 DDL 或标题都清空旧提醒文案（issue #8：文案里有标题，worker 离线时不能一直留着旧标题）。
 func (s *Server) patchAssignment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in struct {
@@ -416,7 +438,7 @@ func (s *Server) patchAssignment(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `UPDATE assignments SET title = COALESCE($2, title), ddl = COALESCE($3, ddl),
 			ddl_uncertain = CASE WHEN $3::timestamptz IS NOT NULL THEN COALESCE($4, false) ELSE COALESCE($4, ddl_uncertain) END,
 			reminder_text = CASE WHEN $5 THEN NULL ELSE reminder_text END
-			WHERE id = $1`, id, title, in.DDL, in.DDLUncertain, ddlChanged); err != nil {
+			WHERE id = $1`, id, title, in.DDL, in.DDLUncertain, ddlChanged || title != nil); err != nil {
 			return err
 		}
 		if ddlChanged {
@@ -648,7 +670,7 @@ func (s *Server) patchSource(w http.ResponseWriter, r *http.Request) {
 	s.writeSource(ctx, w, r, id, http.StatusOK)
 }
 
-// DELETE /sources/{source_id} 作者删除自己的来源：不扣分，但该来源积分作废。
+// DELETE /sources/{source_id} 作者删除自己的来源：不扣分，但该来源贡献值作废。
 func (s *Server) deleteSource(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := idParam(r, "source_id")

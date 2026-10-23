@@ -60,6 +60,8 @@ type me struct {
 	RegisteredVia        string `json:"registered_via"`
 	LeaderboardAnonymous bool   `json:"leaderboard_anonymous"`
 	InvitesRemaining     int    `json:"invites_remaining"`
+	// v2：当前生效的管理员禁言 / 全站禁发
+	Restrictions []restriction `json:"restrictions"`
 }
 
 func loadMe(ctx context.Context, q store.Q, id int64) (*me, error) {
@@ -73,6 +75,9 @@ func loadMe(ctx context.Context, q store.Q, id int64) (*me, error) {
 
 func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 	m, err := loadMe(r.Context(), s.DB, currentUser(r).ID)
+	if err == nil {
+		m.Restrictions, err = loadRestrictions(r.Context(), s.DB, m.ID, s.Now())
+	}
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

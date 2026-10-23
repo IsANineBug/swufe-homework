@@ -1,7 +1,9 @@
 // Package jobs 同进程定时任务（WS2）：
-//   - 每 10 分钟：积分结算（pending 到期 → settled / void）
+//   - 每 10 分钟：贡献值结算（pending 到期 → settled / void）
 //   - 每小时：合并提议 7 天未成 → expired；清理过期或已撤销 1 天以上的 refresh token（issue #4 裁决 15）
 //   - 每 6 小时：图片清理（只保留当前学期和上一学期，标记 purged_at 并删文件）；上传后 24h 未发布的附件删除
+//   - 每分钟（WS8，v2）：有期限的封号到期后解封（清空 users.disabled_at）
+//   - 每天 04:00 Asia/Shanghai（WS8，v2）：班级频道保留策略——硬删 30 天前的消息与每班超出最近 500 条的部分
 package jobs
 
 import (
@@ -18,6 +20,7 @@ import (
 
 	"github.com/IsANineBug/swufe-homework/server/internal/files"
 	"github.com/IsANineBug/swufe-homework/server/internal/points"
+	"github.com/IsANineBug/swufe-homework/server/internal/store"
 )
 
 type Runner struct {
@@ -38,6 +41,51 @@ func (j *Runner) Start(ctx context.Context) {
 	go j.loop(ctx, "purge_files", 6*time.Hour, func(ctx context.Context) error {
 		return errors.Join(j.PurgeOldSemesters(ctx), j.PurgeUnboundUploads(ctx))
 	})
+	go j.loop(ctx, "expire_disables", time.Minute, j.ExpireDisables)
+	go j.daily(ctx, "purge_messages", 4, j.PurgeMessages)
+}
+
+// NextDailyRun now 之后下一个 Asia/Shanghai hour:00。
+func NextDailyRun(now time.Time, hour int) time.Time {
+	t := now.In(points.Shanghai)
+	next := time.Date(t.Year(), t.Month(), t.Day(), hour, 0, 0, 0, points.Shanghai)
+	if !next.After(t) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
+}
+
+// daily 每天 hour:00（Asia/Shanghai）跑一次；启动时不立即跑。
+func (j *Runner) daily(ctx context.Context, name string, hour int, fn func(context.Context) error) {
+	for {
+		wait := NextDailyRun(j.Now(), hour).Sub(j.Now())
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+		c, cancel := context.WithTimeout(ctx, time.Hour)
+		if err := fn(c); err != nil && ctx.Err() == nil {
+			slog.Error("job failed", "job", name, "err", err)
+		}
+		cancel()
+	}
+}
+
+// ExpireDisables 有期限的封号到期后解封。
+func (j *Runner) ExpireDisables(ctx context.Context) error {
+	return store.ExpireDisables(ctx, j.DB, 0, j.Now())
+}
+
+// PurgeMessages 频道保留策略：30 天、每班最近 500 条。
+func (j *Runner) PurgeMessages(ctx context.Context) error {
+	n, err := store.PurgeMessages(ctx, j.DB, j.Now())
+	if n > 0 {
+		slog.Info("class messages purged", "rows", n)
+	}
+	return err
 }
 
 func (j *Runner) loop(ctx context.Context, name string, every time.Duration, fn func(context.Context) error) {
