@@ -67,7 +67,8 @@ CREATE TABLE classes (
   name_truncated boolean NOT NULL DEFAULT false, -- 截图里课名被截断
   merged_into  bigint REFERENCES classes(id),  -- 自动合并后指向保留的班
   created_by   bigint NOT NULL REFERENCES users(id),
-  created_at   timestamptz NOT NULL DEFAULT now()
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  hidden_at    timestamptz                     -- v2：管理员隐藏的垃圾班级，成员/搜索/导入都看不到，可恢复
 );
 CREATE INDEX classes_name_trgm ON classes USING gin (name gin_trgm_ops);
 
@@ -248,12 +249,13 @@ CREATE TABLE points_ledger (
   source_id     bigint REFERENCES assignment_sources(id),
   reason        text NOT NULL CHECK (reason IN (
                   'first_post','supplement','thanks','deleted_revoke','deleted_penalty',
-                  'restore_refund','merge_adjust')),
+                  'restore_refund','merge_adjust','admin_adjust')),   -- v2：admin_adjust = 管理员调整贡献值
   delta         int NOT NULL,
   status        text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','settled','void')),
   settle_at     timestamptz NOT NULL,          -- 首发/补充 = 发布后 24h
   created_at    timestamptz NOT NULL DEFAULT now(),
-  local_day     date NOT NULL                  -- Asia/Shanghai 日期，用于每日 30 分上限
+  local_day     date NOT NULL,                 -- Asia/Shanghai 日期，用于每日 30 分上限（admin_adjust 不计入）
+  note          text                           -- v2：admin_adjust 的原因，本人可见
 );
 CREATE INDEX points_user_day ON points_ledger (user_id, local_day) WHERE status = 'settled';
 CREATE INDEX points_class_time ON points_ledger (class_id, created_at) WHERE status = 'settled';
@@ -300,6 +302,63 @@ CREATE INDEX ai_jobs_queued ON ai_jobs (created_at) WHERE status = 'queued';
 CREATE INDEX ai_jobs_requester ON ai_jobs (requested_by, created_at) WHERE requested_by IS NOT NULL;
 CREATE INDEX ai_jobs_open ON ai_jobs (expires_at) WHERE status IN ('queued', 'running');
 -- 任务输入含作业正文，结束 24 小时后由服务器定时删除（不长期保存）。
+
+-- ---------- v2（迁移 0005，WS8）：班级频道、举报、管理员处置 ----------
+-- 班级交流频道：纯文字，每条 ≤300 字；只保留 30 天且每班最近 500 条（定时任务硬删）
+CREATE TABLE class_messages (
+  id          bigserial PRIMARY KEY,
+  class_id    bigint NOT NULL REFERENCES classes(id),
+  user_id     bigint NOT NULL REFERENCES users(id),
+  body        text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 300),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  deleted_at  timestamptz,
+  deleted_by  text CHECK (deleted_by IN ('author','admin'))
+);
+CREATE INDEX class_messages_class ON class_messages (class_id, id);
+CREATE INDEX class_messages_user_time ON class_messages (user_id, created_at);   -- 限频
+
+-- 举报：同一人对同一对象只能有一条未处理举报
+CREATE TABLE reports (
+  id           bigserial PRIMARY KEY,
+  reporter_id  bigint NOT NULL REFERENCES users(id),
+  target_kind  text NOT NULL CHECK (target_kind IN ('source','message','class','user')),
+  target_id    bigint NOT NULL,
+  reason       text NOT NULL CHECK (char_length(reason) BETWEEN 1 AND 200),
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  handled_at   timestamptz,
+  handled_by   bigint REFERENCES users(id),
+  resolution   text CHECK (resolution IN ('removed','dismissed'))
+);
+CREATE UNIQUE INDEX reports_open_unique ON reports (reporter_id, target_kind, target_id) WHERE handled_at IS NULL;
+CREATE INDEX reports_open ON reports (created_at) WHERE handled_at IS NULL;
+
+-- 管理员处置：mute = 频道禁言；post_ban = 全站禁发作业；disable = 封号（同时写 users.disabled_at）
+-- 投票触发的单班禁发仍在 post_bans，不进这张表。
+CREATE TABLE user_sanctions (
+  id          bigserial PRIMARY KEY,
+  user_id     bigint NOT NULL REFERENCES users(id),
+  kind        text NOT NULL CHECK (kind IN ('mute','post_ban','disable')),
+  reason      text NOT NULL CHECK (char_length(reason) BETWEEN 1 AND 200),
+  starts_at   timestamptz NOT NULL DEFAULT now(),
+  ends_at     timestamptz,                     -- NULL = 永久（仅 disable 允许）
+  created_by  bigint NOT NULL REFERENCES users(id),
+  lifted_at   timestamptz,
+  lifted_by   bigint REFERENCES users(id)
+);
+CREATE INDEX user_sanctions_active ON user_sanctions (user_id, kind) WHERE lifted_at IS NULL;
+
+-- 管理员操作日志：每个 /admin 写操作一行，只增不改（撤销另记一行）
+CREATE TABLE admin_actions (
+  id           bigserial PRIMARY KEY,
+  admin_id     bigint NOT NULL REFERENCES users(id),
+  action       text NOT NULL,                  -- 如 class_hide / source_delete / sanction_add / points_adjust
+  target_kind  text NOT NULL,
+  target_id    bigint NOT NULL,
+  reason       text,
+  payload      jsonb NOT NULL DEFAULT '{}',    -- 改前/改后的值，不放密码、恢复码、token
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX admin_actions_time ON admin_actions (created_at DESC);
 
 -- ---------- 种子数据 ----------
 INSERT INTO periods (no, starts_at, ends_at) VALUES
