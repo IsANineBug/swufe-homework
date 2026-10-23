@@ -1,6 +1,12 @@
 package com.swufe.homework.ui.homework
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -23,6 +31,7 @@ import com.swufe.homework.BuildConfig
 import com.swufe.homework.data.api.AssignmentSummary
 import com.swufe.homework.util.Ddl
 import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.ui.theme.semantic
 
 /** DDL 不一致（ddl_conflict）、24 小时内截止统一用这个红（主题语义色 urgent，随深浅模式切换）。 */
@@ -43,28 +52,33 @@ fun UncertainTag() = Tag("待确认", MaterialTheme.semantic.warningContainer, M
 @Composable
 fun ConflictTag() = Tag("DDL 不一致", MaterialTheme.semantic.urgentContainer, MaterialTheme.semantic.onUrgentContainer)
 
-/** 10月23日 周五 13:55 · 还剩 2 天；不一致时整行标红。 */
+/** 10月23日 周五 13:55 · 还剩 2 天；DDL 不一致或 24 小时内截止（[urgent]）时整行标红。 */
 @Composable
-fun DdlLine(ddl: String, conflict: Boolean, uncertain: Boolean, modifier: Modifier = Modifier) {
+fun DdlLine(ddl: String, conflict: Boolean, uncertain: Boolean, modifier: Modifier = Modifier, urgent: Boolean = false) {
     val t = Ddl.parse(ddl)
+    val red = conflict || urgent
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             if (t != null) "${Ddl.display(t)} · ${Ddl.remaining(t)}" else ddl,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (conflict) ConflictRed else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = if (conflict) FontWeight.SemiBold else null,
+            color = if (red) ConflictRed else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (red) FontWeight.SemiBold else null,
         )
         if (uncertain) UncertainTag()
         if (conflict) ConflictTag()
     }
 }
 
+/**
+ * 作业卡片。[urgent] = 24 小时内截止（见 [HomeFilter.isUrgent]）：左侧 Urgent 色条 + DDL 行变红。
+ */
 @Composable
 fun AssignmentCard(
     a: AssignmentSummary,
     showClass: Boolean,
     onClick: () -> Unit,
     onToggleDone: ((Boolean) -> Unit)?,
+    urgent: Boolean = false,
 ) {
     Card(
         onClick = onClick,
@@ -73,7 +87,14 @@ fun AssignmentCard(
             containerColor = if (a.done) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
-        Row(Modifier.padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+      Row(Modifier.height(IntrinsicSize.Min)) {
+        if (urgent) {
+            Box(
+                Modifier.width(Spacing.xs).fillMaxHeight().background(MaterialTheme.semantic.urgent)
+                    .semantics { contentDescription = "24 小时内截止" },
+            )
+        }
+        Row(Modifier.weight(1f).padding(start = Spacing.xs, end = Spacing.md, top = Spacing.sm, bottom = Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
             if (onToggleDone != null) Checkbox(checked = a.done, onCheckedChange = onToggleDone)
             Column(Modifier.weight(1f).padding(start = if (onToggleDone == null) 8.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (showClass) Text(a.className, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -84,12 +105,13 @@ fun AssignmentCard(
                     overflow = TextOverflow.Ellipsis,
                     textDecoration = if (a.done) TextDecoration.LineThrough else null,
                 )
-                DdlLine(a.ddl, a.ddlConflict, a.ddlUncertain)
+                DdlLine(a.ddl, a.ddlConflict, a.ddlUncertain, urgent = urgent)
                 if (a.sourceCount > 1) {
-                    Text("${a.sourceCount} 条来源", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Text("${a.sourceCount} 条来源", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
+      }
     }
 }
 
