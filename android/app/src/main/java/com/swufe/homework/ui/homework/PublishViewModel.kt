@@ -17,6 +17,9 @@ import com.swufe.homework.data.api.Attachment
 import com.swufe.homework.data.api.SourceCreate
 import com.swufe.homework.data.api.SourcePatch
 import com.swufe.homework.data.api.userMessage
+import com.swufe.homework.data.repo.AiJobState
+import com.swufe.homework.data.repo.AiJobStatus
+import com.swufe.homework.data.repo.AiJobTracker
 import com.swufe.homework.data.repo.AssignmentRepository
 import com.swufe.homework.ui.nav.Routes
 import com.swufe.homework.util.Ddl
@@ -44,6 +47,7 @@ class PublishViewModel @Inject constructor(
     saved: SavedStateHandle,
     @ApplicationContext private val ctx: Context,
     private val repo: AssignmentRepository,
+    private val tracker: AiJobTracker,
 ) : ViewModel() {
     private val route = saved.toRoute<Routes.Publish>()
     val classId = route.classId
@@ -75,6 +79,7 @@ class PublishViewModel @Inject constructor(
     init {
         viewModelScope.launch { aiOnline = repo.aiOnline() }
         if (mode == PublishMode.Edit) loadSource()
+        observeAiJob() // WS10：智能识别走后台识图 AiJobTracker
     }
 
     private fun loadSource() = viewModelScope.launch {
@@ -131,18 +136,68 @@ class PublishViewModel @Inject constructor(
         return existing.map { it.id } + newImages.mapNotNull { uploaded[it] }
     }
 
-    // ---- 智能识别 ----
+    // ---- 智能识别（WS10：parse_assignment 走 AiJobTracker，可离开本页，结果从 tracker 取）----
+    private fun aiContext(): Map<String, String> = mapOf(
+        "class_id" to "$classId",
+        "assignment_id" to "${route.assignmentId}",
+        "source_id" to "${route.sourceId}",
+        "text" to body,
+        "image_uris" to newImages.joinToString("\n"),
+        "attachment_ids" to newImages.map { uploaded[it] ?: -1 }.joinToString(","),
+    )
+
+    private fun isMine(s: AiJobState) = s.kind == AiJobTracker.PARSE_ASSIGNMENT &&
+        s.context["class_id"] == "$classId" && s.context["assignment_id"] == "${route.assignmentId}" &&
+        s.context["source_id"] == "${route.sourceId}"
+
     fun aiRecognize() {
         if (!aiOnline || busy != null) return
         if (body.isBlank() && newImages.isEmpty() && existing.isEmpty()) { error = "先粘贴作业文字或选几张图片"; return }
         error = null
         viewModelScope.launch {
             val ids = uploadAll() ?: run { busy = null; return@launch }
-            busy = "电脑正在识别…"
-            repo.aiParse(classId, body, ids)
-                .onSuccess { (jobId, d) -> aiJobId = jobId; applyDraft(d) }
-                .onFailure { error = it.userMessage; aiOnline = repo.aiOnline() }
-            busy = null
+            busy = AI_WAITING
+            tracker.start(AiJobTracker.PARSE_ASSIGNMENT, ids, aiContext(), text = body, classId = classId)
+                .onSuccess { s -> if (!isMine(s)) { busy = null; error = "另一条作业正在识别，请稍后再试" } }
+                .onFailure { busy = null; error = it.userMessage; aiOnline = repo.aiOnline() }
+        }
+    }
+
+    private fun observeAiJob() = viewModelScope.launch {
+        tracker.restore()
+        tracker.jobs.collect { list ->
+            val s = list.firstOrNull { it.kind == AiJobTracker.PARSE_ASSIGNMENT }
+            if (s == null || !isMine(s)) { if (busy == AI_WAITING) busy = null; return@collect }
+            when (s.status) {
+                AiJobStatus.Running -> { restoreAiInputs(s); busy = AI_WAITING }
+                AiJobStatus.Done -> {
+                    tracker.take(s.jobId)
+                    restoreAiInputs(s)
+                    aiJobId = s.jobId
+                    applyDraft(tracker.assignmentDraft(s))
+                    busy = null
+                }
+                AiJobStatus.Failed, AiJobStatus.Timeout -> {
+                    tracker.take(s.jobId)
+                    restoreAiInputs(s)
+                    error = s.message
+                    busy = null
+                    aiOnline = repo.aiOnline()
+                }
+            }
+        }
+    }
+
+    /** 本页被销毁后从状态条/通知回来：恢复识别前填的文字和已上传的图片。 */
+    private fun restoreAiInputs(s: AiJobState) {
+        if (body.isBlank()) body = s.context["text"].orEmpty()
+        if (newImages.isEmpty()) {
+            val uris = s.context["image_uris"].orEmpty().split("\n").filter { it.isNotBlank() }.map { Uri.parse(it) }
+            val ids = s.context["attachment_ids"].orEmpty().split(",").map { it.trim().toIntOrNull() ?: -1 }
+            if (uris.size == ids.size) {
+                newImages = uris
+                uris.zip(ids).forEach { (u, id) -> if (id >= 0) uploaded[u] = id }
+            }
         }
     }
 
@@ -240,6 +295,7 @@ class PublishViewModel @Inject constructor(
 
     companion object {
         const val MAX_IMAGES = 6
+        private const val AI_WAITING = "正在识别…（已在后台识别，可以先去别的页面，好了会提醒）"
         const val MAX_PICK_BYTES = 10L * 1024 * 1024
         private const val CANCELLED = -1
     }

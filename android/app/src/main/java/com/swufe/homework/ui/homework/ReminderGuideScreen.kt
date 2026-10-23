@@ -3,7 +3,6 @@ package com.swufe.homework.ui.homework
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -16,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,7 +38,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -47,6 +46,9 @@ import com.swufe.homework.reminder.Notifications
 import com.swufe.homework.reminder.ReminderPrefs
 import com.swufe.homework.reminder.ReminderScheduler
 import com.swufe.homework.ui.common.BackTopBar
+import com.swufe.homework.ui.common.SectionHeader
+import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.Spacing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -71,8 +73,8 @@ fun FirstLaunchGuide(onShow: () -> Unit, vm: ReminderGuideViewModel = hiltViewMo
 }
 
 /**
- * 提醒设置引导：通知权限、精确闹钟、电池优化白名单、自启动（按品牌跳转，通用兜底到应用详情）。
- * requirements §十：首次打开时引导开启自启动和电池白名单。
+ * 提醒设置引导：通知权限、准时提醒（系统的「闹钟和提醒」权限）、电池优化白名单。
+ * requirements 十 / 十三.5：只发通知不响铃；v2 去掉自启动引导（代价：部分国产系统重启手机后要打开一次 App 提醒才重新排好）。
  */
 @Composable
 fun ReminderGuideScreen(onBack: () -> Unit, vm: ReminderGuideViewModel = hiltViewModel()) {
@@ -89,39 +91,45 @@ fun ReminderGuideScreen(onBack: () -> Unit, vm: ReminderGuideViewModel = hiltVie
     val finish = { vm.done(); onBack() }
     BackHandler { finish() }
     Scaffold(topBar = { BackTopBar("提醒设置", finish) }) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
             Text(
-                "作业提醒由手机本地闹钟触发（DDL 前 2 天 09:00、前 1 天 09:00、前 12 小时），不依赖推送。" +
-                    "国产系统默认会清理后台，请把下面几项都打开，否则提醒可能不响。",
+                "作业提醒由手机本地定时发出（DDL 前 2 天 09:00、前 1 天 09:00、前 12 小时），只发通知、不响铃，不依赖推送。" +
+                    "国产系统默认会清理后台，请把下面几项都打开，否则提醒可能不准时。",
                 style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(horizontal = Spacing.lg),
             )
+            SectionHeader("需要开启")
             Step("通知权限", "用通知栏消息提醒你，带「标记完成」按钮", notifOk) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifOk) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 else openNotificationSettings(ctx)
             }
-            Step("精确闹钟", "准点提醒，不被系统推迟", exactOk) { openExactAlarm(ctx) }
+            Step("准时提醒", "准点提醒不被推迟（系统里叫「闹钟和提醒」）", exactOk) { openExactAlarm(ctx) }
             Step("电池优化白名单", "允许后台运行，省电模式下也能提醒", batteryOk) { openBattery(ctx) }
-            Step("自启动 / 后台运行", "开机和被清理后能重新设置闹钟（${Build.MANUFACTURER}）", null) { openAutoStart(ctx) }
-            HorizontalDivider()
-            Text("以后可以在「我的 → 提醒设置」再来这里。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-            Button(onClick = finish, modifier = Modifier.padding(top = 8.dp)) { Text("完成") }
+            HorizontalDivider(Modifier.padding(vertical = Spacing.sm))
+            Text(
+                "部分手机重启后，要打开一次 App 提醒才会重新排好。以后可以在「我的 → 提醒设置」再来这里。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = Spacing.lg),
+            )
+            Button(onClick = finish, shape = Corners.Button, modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.sm)) { Text("完成") }
         }
     }
 }
 
 @Composable
-private fun Step(title: String, sub: String, ok: Boolean?, onClick: () -> Unit) {
+private fun Step(title: String, sub: String, ok: Boolean, onClick: () -> Unit) {
     ListItem(
         leadingContent = {
-            when (ok) {
-                true -> Icon(Icons.Filled.CheckCircle, contentDescription = "已开启", tint = MaterialTheme.semantic.success)
-                false -> Icon(Icons.Filled.RadioButtonUnchecked, contentDescription = "未开启")
-                null -> Icon(Icons.Filled.RadioButtonUnchecked, contentDescription = "需手动确认", tint = MaterialTheme.colorScheme.outline)
-            }
+            if (ok) Icon(Icons.Filled.CheckCircle, contentDescription = "已开启", tint = MaterialTheme.semantic.success)
+            else Icon(Icons.Filled.RadioButtonUnchecked, contentDescription = "未开启", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         },
         headlineContent = { Text(title) },
         supportingContent = { Text(sub) },
-        trailingContent = { OutlinedButton(onClick = onClick, enabled = ok != true) { Text(if (ok == true) "已开启" else "去设置") } },
+        trailingContent = { OutlinedButton(onClick = onClick, enabled = !ok, shape = Corners.Button) { Text(if (ok) "已开启" else "去设置") } },
     )
 }
 
@@ -144,35 +152,9 @@ private fun openExactAlarm(ctx: Context) {
     ctx.tryStart(appDetails(ctx))
 }
 
-@SuppressLint("BatteryLife") // 直接分发的 APK，提醒依赖后台闹钟，需要白名单（requirements §十）
+@SuppressLint("BatteryLife") // 直接分发的 APK，提醒依赖后台 AlarmManager 闹钟，需要白名单（requirements §十）
 private fun openBattery(ctx: Context) {
     if (ctx.tryStart(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")))) return
     if (ctx.tryStart(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))) return
-    ctx.tryStart(appDetails(ctx))
-}
-
-/** 各品牌自启动管理页；只尝试与本机厂商/品牌匹配的条目（避免误开别家页面），都打不开就进应用详情页。 */
-private data class AutoStart(val brands: List<String>, val pkg: String, val cls: String)
-
-private val AUTO_START = listOf(
-    AutoStart(listOf("xiaomi", "redmi", "poco"), "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
-    AutoStart(listOf("huawei"), "com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
-    AutoStart(listOf("huawei"), "com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"),
-    AutoStart(listOf("honor"), "com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
-    AutoStart(listOf("oppo", "realme", "oneplus"), "com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
-    AutoStart(listOf("oppo", "realme", "oneplus"), "com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
-    AutoStart(listOf("oppo", "realme", "oneplus"), "com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity"),
-    AutoStart(listOf("vivo", "iqoo"), "com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
-    AutoStart(listOf("vivo", "iqoo"), "com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"),
-    AutoStart(listOf("meizu"), "com.meizu.safe", "com.meizu.safe.permission.SmartBGActivity"),
-    AutoStart(listOf("samsung"), "com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"),
-    AutoStart(listOf("oneplus"), "com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"),
-)
-
-private fun openAutoStart(ctx: Context) {
-    val me = "${Build.MANUFACTURER} ${Build.BRAND}".lowercase()
-    for (e in AUTO_START.filter { a -> a.brands.any { it in me } }) {
-        if (ctx.tryStart(Intent().setComponent(ComponentName(e.pkg, e.cls)))) return
-    }
     ctx.tryStart(appDetails(ctx))
 }

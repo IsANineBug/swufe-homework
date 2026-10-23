@@ -15,7 +15,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** 单 Activity；所有页面在 [AppNavHost] 里。通知点击带 assignment_id 进入作业详情。 */
+/** 单 Activity；所有页面在 [AppNavHost] 里。通知点击带 assignment_id 进入作业详情，带 ai_job_kind 进识图确认页。 */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     @Inject lateinit var reminderSync: ReminderSync
@@ -42,5 +42,6 @@ class MainActivity : ComponentActivity() {
     private fun handle(i: Intent?) {
         val id = i?.getIntExtra(Notifications.EXTRA_ASSIGNMENT_ID, -1) ?: -1
         if (id >= 0) deepLinks.open(id)
+        i?.getStringExtra(Notifications.EXTRA_AI_KIND)?.let { deepLinks.openAi(it) }
     }
 }

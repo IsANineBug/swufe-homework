@@ -14,8 +14,8 @@ app/src/main/java/com/swufe/homework/
   ui/auth       登录、注册（校园网检测 + 邀请码）、恢复码展示、找回
   ui/timetable  课表网格、截图导入与确认、手动添加、班级页外壳
   ui/me         我的、设置、邀请码
-  ui/homework   WS5：首页 feed、班级页内容（按周浏览作业、榜单）、发布/补充/编辑、作业详情、积分、提醒引导
-  reminder      WS5：本地提醒（AlarmManager 闹钟、通知、标记完成、开机重建、WorkManager 同步）
+  ui/homework   WS5：首页 feed、班级页内容（按周浏览作业、榜单）、发布/补充/编辑、作业详情、贡献值、提醒引导
+  reminder      WS5：本地提醒（AlarmManager 定时、通知、标记完成、开机重建、WorkManager 同步）；WS10：后台识图通知
   ui/nav        路由与导航图（与 WS5 的约定见 NAVIGATION.md）
 ```
 
@@ -110,7 +110,7 @@ Robolectric 原生绘图只支持 x86_64 Linux / macOS / Windows；不传 `-Pscr
 - 导入：选 1–2 张截图 → 压缩上传 `/uploads` → `/ai/status` 在线才发 `parse_timetable`（只传 `attachment_ids`） → 1.5 秒轮询最多 2 分钟
   → 确认页逐条可改（课名、教室、星期、起止节；截断课名和被裁掉的起节标黄）→ `/timetable/import`，
   conflicts 留在确认页标红让用户改名重提。
-- AI 离线时导入按钮置灰并提示「电脑未在线，请手动添加」；手动添加可用 `/classes/search` 搜已有课一键填入。
+- AI 离线时导入按钮置灰并提示「AI 暂时不可用，请手动添加」；手动添加可用 `/classes/search` 搜已有课一键填入。
 - 班级页「不是我的班」→ `DELETE /me/classes/{id}`（服务端记住退出，重新导入不自动加回，可搜索手动加入）。
 - 启动时检查 GitHub Releases latest（自动检查最多 6 小时一次，避免匿名 API 限额），版本更高则提示下载 APK。
 
@@ -122,10 +122,23 @@ Robolectric 原生绘图只支持 x86_64 Linux / macOS / Windows；不传 `-Pscr
   发布前 `candidates` 查重，在线时再跑 `dedupe_review`（AI 认为同一份的排前面），用户选「作为补充」或「仍然新建」；在线时先跑 `spam_check`，可疑只提示本人。
 - 作业详情：来源列表（首发/补充、昵称、时间、TA 看到的 DDL、缩略图点开全屏缩放）、谢谢、补充、编辑/删除自己的来源、提议合并（选同班另一条作业）、合并提议的赞同 / 首发者同意；
   删除投票：红色按钮 → 固定文案弹窗 → 确认按钮倒数 3 秒。
-- 积分：「我的积分」（学期总分、今日已得 / 30、明细分页）、「积分规则」（`app/src/main/assets/points-rules.md` 的 `---` 之前部分；该文件是 `docs/points-rules.md` 的副本，单测校验两者一致，改规则时一起复制）。
-- 提醒：`/sync` 增量同步写本地 Room 表 `assignment`（v2，只存标题、班级、DDL、完成、提醒文案）；每条未完成作业用 `setExactAndAllowWhileIdle` 设三次闹钟：
+- 贡献值（v2 由「积分」改名，接口与变量名仍是 points）：「我的贡献值」（学期总分、今日已得 / 30、明细分页）、「贡献值规则」（`app/src/main/assets/points-rules.md` 的 `---` 之前部分；该文件是 `docs/points-rules.md` 的副本，单测校验两者一致，改规则时一起复制）。
+- 提醒：`/sync` 增量同步写本地 Room 表 `assignment`（v2，只存标题、班级、DDL、完成、提醒文案）；每条未完成作业用 `setExactAndAllowWhileIdle` 设三次提醒：
   DDL 前 2 天 09:00、前 1 天 09:00、前 12 小时（Asia/Shanghai），已过的跳过，相隔不足 1 小时的合并（保留较晚那次）。
   通知文案优先 `reminder_text[2d|1d|12h]`，否则内置模板；点击进入作业详情；「标记完成」本地立即停止提醒，接口由 WorkManager 调（断网自动重试）。
-  同步时机：每 4 小时（WorkManager，联网时）、打开 App、开机 / 升级 / 改时间或时区 / 精确闹钟权限变化（同时重建闹钟）。退出登录清空闹钟、通知和同步游标。
-- 首次进入主界面打开「提醒设置」引导：通知权限、精确闹钟、电池优化白名单、自启动（小米、华为、荣耀、OPPO/realme、一加、vivo/iQOO、魅族、三星，打不开就进应用详情页）；之后在「我的 → 提醒设置」。
+  同步时机：每 4 小时（WorkManager，联网时）、打开 App、开机 / 升级 / 改时间或时区 / 准时提醒权限变化（同时重排提醒）。退出登录清空提醒、通知和同步游标。
+- 首次进入主界面打开「提醒设置」引导：通知权限、准时提醒（系统里叫「闹钟和提醒」）、电池优化白名单；之后在「我的 → 提醒设置」。
+  v2 去掉了自启动引导（requirements 十三.5）：部分国产系统重启手机后要打开一次 App 提醒才重新排好；开机广播重排提醒保留。
 - 图片用带证书固定的 OkHttp 加载（Coil `ImageLoaderFactory`），相对 URL（`/files/...`）补成服务器地址。
+
+## v2（WS10 PR②）
+- **改名**：界面上「积分」→「贡献值」，「闹钟」→「提醒」（唯一例外是系统权限名「闹钟和提醒」，引导页按需求原文引用）。接口字段、路由、变量名不变。
+- **后台识图**（requirements 十三.1）：`data/repo/AiJobTracker`（@Singleton，应用级 `CoroutineScope(SupervisorJob() + Dispatchers.IO)`）。
+  - 只有 `parse_timetable`、`parse_assignment` 走它；`dedupe_review`、`spam_check` 仍同步等待。
+  - `start()` 建任务后把 `{job_id, kind, context, created_at, …}` 存 DataStore（文件 `ai_jobs`，键 `pending_ai_jobs`），每 1.5 秒轮询到 `created_at + 150 秒`；同 kind 已有进行中的直接返回它。
+  - App 启动（`SwufeApp` → `AiJobNotifier.start()` → `restore()`）恢复未过期的任务，过期的标超时并移除；已完成未取走的结果保留 24 小时。
+  - 确认页（课表导入页、作业发布页）从 tracker 读结果后 `take()` 删除；用户放弃 `dismiss()`。作业草稿页需要的 class_id / assignment_id / source_id、识别前填的文字和已上传图片放 `context`（只存本机，不发服务器）。
+  - 主界面顶部 `StatusBanner`；识别结束时前台弹 Snackbar、后台（`ProcessLifecycleOwner` 未到 STARTED）发「AI 识别」渠道通知，点通知经 `DeepLinks` 进确认页。
+  - 不用 WorkManager / 前台服务：进程被杀期间不轮询，重开后接着查（服务器任务结束 24 小时内可查）。
+- **课表导入确认页**：识别结果里有截断课名或 `start_visible=false` 时，页顶提示「截图上方/下方可能被裁掉，建议补截另一半一起识别」+「再加一张」（最多 2 张，与原图一起重新识别）。
+- **「我的」处罚提示**：`/me` 的 `restrictions` 非空时显示「你被禁言/禁发到 X，原因：…」。

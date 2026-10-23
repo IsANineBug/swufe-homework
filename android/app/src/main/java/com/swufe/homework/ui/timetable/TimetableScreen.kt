@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -35,10 +34,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.filled.CalendarMonth
+import com.swufe.homework.ui.common.EmptyState
+import com.swufe.homework.ui.common.ErrorState
+import com.swufe.homework.ui.common.LoadingState
+import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.Spacing
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.swufe.homework.data.api.Period
@@ -47,8 +51,11 @@ import com.swufe.homework.ui.theme.CourseColors
 import com.swufe.homework.util.WEEKDAY_NAMES
 import com.swufe.homework.ui.theme.OnCourseColor
 
-private val ROW_H = 56.dp
-private val AXIS_W = 40.dp
+// 网格尺寸（布局常量，不是间距）：每节一行，左侧时间轴宽度
+private val ROW_H = 60.dp
+private val AXIS_W = 44.dp
+private val BLOCK_GAP = 2.dp
+private val ICON = 18.dp
 
 /** 课表 tab：周一到周五 × 12 节网格。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,33 +79,40 @@ fun TimetableScreen(
                 IconButton(onClick = vm::refresh) { Icon(Icons.Filled.Refresh, contentDescription = "刷新") }
             },
         )
-        if (refreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (refreshing && classes.isNotEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
         ImportBar(aiOnline, onImport, onManual)
-        if (error != null) Box(Modifier.padding(horizontal = 16.dp)) { ErrorText(error) }
-        if (classes.isEmpty() && !refreshing) {
-            Text(
+        when {
+            classes.isNotEmpty() -> {
+                if (error != null) Box(Modifier.padding(horizontal = Spacing.lg)) { ErrorText(error) }
+                TimetableGrid(periods, buildBlocks(classes), onOpenClass)
+            }
+            refreshing -> LoadingState(message = "正在加载课表…")
+            error != null -> ErrorState(error ?: "", onRetry = vm::refresh)
+            else -> EmptyState(
                 "还没有课程。导入易校园课表截图，或手动添加课程。",
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium,
+                icon = Icons.Filled.CalendarMonth,
+                actionLabel = "手动添加",
+                onAction = onManual,
             )
         }
-        TimetableGrid(periods, buildBlocks(classes), onOpenClass)
     }
 }
 
 @Composable
 private fun ImportBar(aiOnline: Boolean, onImport: () -> Unit, onManual: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onImport, enabled = aiOnline, modifier = Modifier.weight(1f)) { Text("导入课表截图") }
-            OutlinedButton(onClick = onManual, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Button(onClick = onImport, enabled = aiOnline, shape = Corners.Button, modifier = Modifier.weight(1f)) { Text("导入课表截图") }
+            OutlinedButton(onClick = onManual, shape = Corners.Button, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(ICON))
                 Text("手动添加")
             }
         }
         if (!aiOnline) {
-            Text("电脑未在线，请手动添加", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            Text(AI_OFFLINE_MESSAGE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -123,11 +137,11 @@ fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Text("${i + 1}", style = MaterialTheme.typography.labelMedium)
-                        if (p != null) Text(p.start, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                        if (p != null) Text(p.start, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
                     Box(
-                        Modifier.offset(x = AXIS_W, y = ROW_H * i).fillMaxWidth().height(1.dp)
-                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                        Modifier.offset(x = AXIS_W, y = ROW_H * i).fillMaxWidth().height(Dp.Hairline)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
                     )
                 }
                 blocks.forEach { b ->
@@ -136,15 +150,15 @@ fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (
                         Modifier
                             .offset(x = AXIS_W + colW * (b.weekday - 1), y = ROW_H * (b.start - 1))
                             .width(colW).height(ROW_H * (b.end - b.start + 1))
-                            .padding(1.5.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            .padding(BLOCK_GAP)
+                            .clip(Corners.Tag)
                             .background(color)
                             .clickable { onOpenClass(b.classId) }
-                            .padding(3.dp),
+                            .padding(Spacing.xs),
                     ) {
                         Column {
-                            Text(b.name, color = OnCourseColor, fontSize = 11.sp, lineHeight = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                            Text(b.room, color = OnCourseColor.copy(alpha = 0.9f), fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(b.name, color = OnCourseColor, style = MaterialTheme.typography.labelMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            Text(b.room, color = OnCourseColor, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }

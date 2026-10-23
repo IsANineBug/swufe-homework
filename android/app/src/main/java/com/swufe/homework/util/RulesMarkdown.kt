@@ -1,7 +1,7 @@
 package com.swufe.homework.util
 
 /**
- * 「积分规则」页：原样展示 docs/points-rules.md 的上半部分（`---` 之前，不含「实现说明」）。
+ * 「贡献值规则」页：原样展示 docs/points-rules.md 的上半部分（`---` 之前，不含「实现说明」）。
  * 只处理该文件用到的几种语法：#/## 标题、> 引用、表格、- 列表、**粗体**。
  */
 sealed interface RulesBlock {

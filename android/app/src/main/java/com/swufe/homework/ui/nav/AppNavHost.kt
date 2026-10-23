@@ -35,7 +35,9 @@ import com.swufe.homework.ui.homework.MyPointsScreen
 import com.swufe.homework.ui.homework.PointsRulesScreen
 import com.swufe.homework.ui.homework.PublishScreen
 import com.swufe.homework.ui.homework.ReminderGuideScreen
+import com.swufe.homework.ui.main.AiJobSnackbarOverlay
 import com.swufe.homework.ui.main.MainScreen
+import com.swufe.homework.ui.main.openAiJob
 import com.swufe.homework.ui.me.InvitesScreen
 import com.swufe.homework.ui.me.SettingsScreen
 import com.swufe.homework.ui.timetable.ClassPageScreen
@@ -138,6 +140,7 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
                 onPoints = { nav.navigate(Routes.MyPoints) },
                 onRules = { nav.navigate(Routes.PointsRules) },
                 onReminderGuide = { nav.navigate(Routes.ReminderGuide) },
+                onOpenAiJob = { s, manual -> nav.openAiJob(s, manual) },
                 home = { HomeScreen(onOpen = { nav.navigate(Routes.AssignmentDetail(it)) }) },
             )
         }
@@ -191,6 +194,8 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
         composable<Routes.Settings> { SettingsScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Invites> { InvitesScreen(onBack = { nav.popBackStack() }) }
     }
+    // WS10 后台识图：识别结束的 Snackbar（非主界面时）与「AI 识别」通知点击
+    if (loggedIn == true) AiJobSnackbarOverlay(nav, deepLinks)
 }
 
 /** 清空返回栈后跳转（登录、登出、会话过期）。 */
@@ -201,10 +206,15 @@ fun NavHostController.goTo(route: Any) {
     }
 }
 
-/** 通知点击带来的待打开作业 id（MainActivity 写入，导航图消费）。 */
+/** 通知点击带来的待打开作业 id / 后台识图任务 kind（MainActivity 写入，导航图消费）。 */
 class DeepLinks {
     private val _assignment = kotlinx.coroutines.flow.MutableStateFlow<Int?>(null)
     val assignment: kotlinx.coroutines.flow.StateFlow<Int?> = _assignment
     fun open(id: Int) { _assignment.value = id }
     fun consume() { _assignment.value = null }
+
+    private val _aiKind = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val aiKind: kotlinx.coroutines.flow.StateFlow<String?> = _aiKind
+    fun openAi(kind: String) { _aiKind.value = kind }
+    fun consumeAi() { _aiKind.value = null }
 }

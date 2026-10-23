@@ -38,9 +38,9 @@ class HomeworkMiscTest {
         assertFalse(upper.contains("实现说明"))
         assertTrue(upper.contains("每人每天最多获得 30 分"))
         val blocks = RulesMarkdown.parse(upper)
-        assertEquals(RulesBlock.Title("积分规则"), blocks.first())
+        assertEquals(RulesBlock.Title("贡献值规则"), blocks.first())
         val table = blocks.filterIsInstance<RulesBlock.Table>().single()
-        assertEquals(listOf("行为", "积分", "条件"), table.header)
+        assertEquals(listOf("行为", "贡献值", "条件"), table.header)
         assertEquals(3, table.rows.size)
         assertEquals(listOf("班级周榜" to true, "：每周一 00:00 重置。" to false), RulesMarkdown.spans("**班级周榜**：每周一 00:00 重置。"))
     }

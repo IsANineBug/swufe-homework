@@ -8,7 +8,7 @@
 |---|---|---|
 | 首页 `MainTab.Home` | **WS5** | `MainScreen(home = { HomeScreen(...) })`，/feed。启动默认打开首页。 |
 | 课表 `MainTab.Timetable` | WS4 | 网格、导入、手动添加 |
-| 我的 `MainTab.Me` | WS4 | 设置、邀请码、检查更新；WS5 加了「我的积分」「积分规则」「提醒设置」 |
+| 我的 `MainTab.Me` | WS4 | 设置、邀请码、检查更新；WS5 加了「我的贡献值」「贡献值规则」「提醒设置」（v2 改名，路由名不变） |
 
 ## 班级页 `Routes.ClassPage(classId)`
 - 外壳 `ui/timetable/ClassPage.kt` 的 `ClassPageScreen`：WS4 提供顶部栏（课名）、时段/人数头部、「不是我的班」。
@@ -33,10 +33,15 @@
 |---|---|
 | `AssignmentDetail(id)` | 作业详情（通知点击也进这里：`MainActivity` 读 `assignment_id` extra → `DeepLinks` → 导航） |
 | `Publish(classId, assignmentId = -1, sourceId = -1)` | 发布（只有 classId）/ 补充（带 assignmentId）/ 编辑自己的来源（再带 sourceId） |
-| `MyPoints`、`PointsRules` | 我的积分、积分规则 |
+| `MyPoints`、`PointsRules` | 我的贡献值、贡献值规则 |
 | `ReminderGuide` | 提醒设置引导（首次进入主界面自动打开一次） |
 
 ## WS11 新增页面
 | 路由 | 页面 |
 |---|---|
 | `EditAssignment(id)` | 首发者编辑作业（标题、DDL → `PATCH /assignments/{id}`；说明 = 首发来源正文与图片 → `PATCH /sources/{id}`）。入口：作业详情顶栏「编辑」，仅 `Assignment.is_first_poster` 为真时显示 |
+
+## 后台识图（WS10，v2）
+- `data/repo/AiJobTracker`（@Singleton）跟踪 `parse_timetable` / `parse_assignment`；`MainScreen` 顶部状态条、识别结束的 Snackbar、「AI 识别」通知都从它读。
+- 点状态条 / Snackbar / 通知：课表 → `TimetableImport`（失败「手动添加」→ `TimetableManual`）；作业 → `Publish(class_id, assignment_id, source_id)`（取自任务 context）。逻辑在 `ui/main/MainScreen.kt` 的 `openAiJob`。
+- 通知点击：`MainActivity` 读 `ai_job_kind` extra → `DeepLinks.openAi(kind)` → `AiJobSnackbarOverlay` 导航。
