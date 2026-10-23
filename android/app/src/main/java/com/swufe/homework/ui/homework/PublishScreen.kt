@@ -87,7 +87,7 @@ fun PublishScreen(onBack: () -> Unit, onDone: (Int) -> Unit, vm: PublishViewMode
                         Text(" 智能识别")
                     }
                     Text(
-                        if (vm.aiOnline) "粘贴文字或选图后，自动填表（需核对）" else "电脑未在线，请手动填写",
+                        if (vm.aiOnline) "粘贴文字或选图后，自动填表（需核对）" else "AI 暂时不可用，请手动添加",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )

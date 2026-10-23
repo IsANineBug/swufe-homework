@@ -6,18 +6,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -27,7 +25,11 @@ import com.swufe.homework.data.api.ClassInfo
 import com.swufe.homework.data.api.userMessage
 import com.swufe.homework.data.repo.TimetableRepository
 import com.swufe.homework.ui.common.BackTopBar
+import com.swufe.homework.ui.common.ConfirmDialog
+import com.swufe.homework.ui.common.EmptyState
+import com.swufe.homework.ui.common.ErrorState
 import com.swufe.homework.ui.common.ErrorText
+import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.ui.nav.Routes
 import com.swufe.homework.util.weekdayName
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,9 +46,12 @@ class ClassHeaderViewModel @Inject constructor(
     var error by mutableStateOf<String?>(null); private set
     var leaving by mutableStateOf(false); private set
 
-    init {
+    init { reload() }
+
+    fun reload() {
+        error = null
         viewModelScope.launch {
-            info = repo.cachedClass(classId)
+            if (info == null) info = repo.cachedClass(classId)
             repo.classDetail(classId).onSuccess { info = it }.onFailure { if (info == null) error = it.userMessage }
         }
     }
@@ -71,7 +76,7 @@ fun ClassPageScreen(
     body: @Composable (classId: Int) -> Unit = { ClassBodyPlaceholder() },
     vm: ClassHeaderViewModel = hiltViewModel(),
 ) {
-    var confirm by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var confirm by rememberSaveable { mutableStateOf(false) }
     Scaffold(
         topBar = {
             BackTopBar(vm.info?.name ?: "班级", onBack) {
@@ -80,33 +85,44 @@ fun ClassPageScreen(
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            ClassHeader(vm.info)
-            ErrorText(vm.error)
+            val info = vm.info
+            if (info != null) {
+                ClassHeader(info)
+                vm.error?.let { Box(Modifier.padding(horizontal = Spacing.lg)) { ErrorText(it) } }
+            } else if (vm.error != null) {
+                ErrorState(vm.error ?: "", onRetry = vm::reload, fill = false)
+            }
             Box(Modifier.weight(1f).fillMaxWidth()) { body(vm.classId) }
         }
     }
     if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text("退出这个班？") },
-            text = { Text("课表识别错了、或者你不在这个教学班，可以退出。退出后不再收到这个班的作业提醒，以后重新导入课表也不会自动加回；如需重新加入，在「手动添加」里搜索这门课。") },
-            confirmButton = { TextButton(onClick = { confirm = false; vm.leave(onLeft) }) { Text("退出") } },
-            dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消") } },
+        ConfirmDialog(
+            title = "退出这个班？",
+            text = "课表识别错了、或者你不在这个教学班，可以退出。退出后不再收到这个班的作业提醒，以后重新导入课表也不会自动加回；如需重新加入，在「手动添加」里搜索这门课。",
+            confirmLabel = "退出",
+            onConfirm = { confirm = false; vm.leave(onLeft) },
+            onDismiss = { confirm = false },
+            destructive = true,
         )
     }
 }
 
 @Composable
-private fun ClassHeader(c: ClassInfo?) {
-    if (c == null) return
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+private fun ClassHeader(c: ClassInfo) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
         c.slots.forEach { Text("${weekdayName(it.weekday)} 第 ${it.start}–${it.end} 节 · ${it.room}", style = MaterialTheme.typography.bodyMedium) }
-        Text(listOfNotNull(c.teacher, "${c.memberCount} 位同学").joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+        Text(
+            listOfNotNull(c.teacher, "${c.memberCount} 位同学").joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
 @Composable
 private fun ClassBodyPlaceholder() {
-    LaunchedEffect(Unit) {}
-    Text("作业列表开发中（WS5）", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.outline)
+    EmptyState("作业列表开发中")
 }

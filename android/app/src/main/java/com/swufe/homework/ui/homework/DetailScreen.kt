@@ -79,7 +79,7 @@ import com.swufe.homework.util.Ddl
 import com.swufe.homework.ui.theme.semantic
 
 /** 删除投票弹窗文案（requirements §七、workstreams WS5 第 4 条），原样展示。 */
-const val DELETE_VOTE_WARNING = "此功能用于删除错误或虚假的内容。达到人数后将删除该内容，并扣除发布者积分。请确认内容有误后再使用此功能。"
+const val DELETE_VOTE_WARNING = "此功能用于删除错误或虚假的内容。达到人数后将删除该内容，并扣除发布者贡献值。请确认内容有误后再使用此功能。"
 const val DELETE_CONFIRM_SECONDS = 3
 
 @Composable

@@ -29,7 +29,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -37,7 +36,15 @@ import com.swufe.homework.data.api.PointsEntry
 import com.swufe.homework.data.api.userMessage
 import com.swufe.homework.data.repo.AssignmentRepository
 import com.swufe.homework.ui.common.BackTopBar
+import com.swufe.homework.ui.common.EmptyState
+import com.swufe.homework.ui.common.ErrorState
 import com.swufe.homework.ui.common.ErrorText
+import com.swufe.homework.ui.common.LoadingState
+import com.swufe.homework.ui.common.SectionHeader
+import com.swufe.homework.ui.theme.Spacing
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
 import com.swufe.homework.util.Ddl
 import com.swufe.homework.util.RulesBlock
 import com.swufe.homework.util.RulesMarkdown
@@ -76,10 +83,11 @@ fun reasonLabel(r: String) = when (r) {
     "first_post" -> "首发作业"
     "supplement" -> "补充内容"
     "thanks" -> "收到谢谢"
-    "deleted_revoke" -> "内容被删除，收回积分"
+    "deleted_revoke" -> "内容被删除，收回贡献值"
     "deleted_penalty" -> "内容被删除，扣分"
-    "restore_refund" -> "管理员恢复，返还积分"
+    "restore_refund" -> "管理员恢复，返还贡献值"
     "merge_adjust" -> "作业合并调整"
+    "admin_adjust" -> "管理员调整"
     else -> r
 }
 
@@ -92,21 +100,31 @@ fun statusLabel(s: String) = when (s) {
 
 @Composable
 fun MyPointsScreen(onBack: () -> Unit, onRules: () -> Unit, vm: PointsViewModel = hiltViewModel()) {
-    Scaffold(topBar = { BackTopBar("我的积分", onBack) { TextButton(onClick = onRules) { Text("积分规则") } } }) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    Scaffold(topBar = { BackTopBar("我的贡献值", onBack) { TextButton(onClick = onRules) { Text("贡献值规则") } } }) { pad ->
+        val total = vm.total
+        if (total == null) {
+            Box(Modifier.padding(pad).fillMaxSize()) {
+                if (vm.error != null) ErrorState(vm.error ?: "", onRetry = { vm.load(reset = true) })
+                else LoadingState(skeleton = true)
+            }
+            return@Scaffold
+        }
+        LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(bottom = Spacing.xl)) {
             item {
-                Card(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("本学期积分", style = MaterialTheme.typography.labelLarge)
-                        Text("${vm.total ?: "…"}", style = MaterialTheme.typography.displaySmall)
+                Card(Modifier.fillMaxWidth().padding(Spacing.lg)) {
+                    Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        Text("本学期贡献值", style = MaterialTheme.typography.labelLarge)
+                        Text("$total", style = MaterialTheme.typography.displaySmall)
                         Text("今日已得 ${vm.today} / 30 分", style = MaterialTheme.typography.bodyMedium)
-                        Text("积分只作荣誉展示，不能兑换、不能转让。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                        Text("贡献值只作荣誉展示，不能兑换、不能转让。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-            item { ErrorText(vm.error) }
-            if (vm.total != null && vm.items.isEmpty()) {
-                item { Text("还没有积分记录。", color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(16.dp)) }
+            vm.error?.let { e -> item { Box(Modifier.padding(horizontal = Spacing.lg)) { ErrorText(e) } } }
+            if (vm.items.isEmpty()) {
+                item { EmptyState("还没有贡献值记录。首发或补充作业、收到「谢谢」都会记在这里。", icon = Icons.Filled.Star, fill = false) }
+            } else {
+                item { SectionHeader("明细") }
             }
             items(vm.items) { e ->
                 ListItem(
@@ -122,7 +140,7 @@ fun MyPointsScreen(onBack: () -> Unit, onRules: () -> Unit, vm: PointsViewModel 
                             (if (e.delta > 0) "+" else "") + e.delta,
                             style = MaterialTheme.typography.titleMedium,
                             color = when {
-                                e.status == "void" -> MaterialTheme.colorScheme.outline
+                                e.status == "void" -> MaterialTheme.colorScheme.onSurfaceVariant
                                 e.delta < 0 -> MaterialTheme.colorScheme.error
                                 else -> MaterialTheme.semantic.success
                             },
@@ -131,8 +149,8 @@ fun MyPointsScreen(onBack: () -> Unit, onRules: () -> Unit, vm: PointsViewModel 
                 )
                 HorizontalDivider()
             }
-            if (vm.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp)) }
-            else if (vm.cursor != null) item { TextButton(onClick = { vm.load(reset = false) }, modifier = Modifier.padding(8.dp)) { Text("加载更多") } }
+            if (vm.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(Spacing.lg)) }
+            else if (vm.cursor != null) item { TextButton(onClick = { vm.load(reset = false) }, modifier = Modifier.padding(Spacing.sm)) { Text("加载更多") } }
         }
     }
 }
@@ -147,17 +165,21 @@ private fun loadRules(ctx: Context): List<RulesBlock> =
 fun PointsRulesScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val blocks = remember { loadRules(ctx) }
-    Scaffold(topBar = { BackTopBar("积分规则", onBack) }) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Scaffold(topBar = { BackTopBar("贡献值规则", onBack) }) { pad ->
+        if (blocks.isEmpty()) {
+            EmptyState("规则暂时无法显示，请更新到最新版本。", Modifier.padding(pad))
+            return@Scaffold
+        }
+        LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             items(blocks) { b ->
                 when (b) {
                     is RulesBlock.Title -> Text(b.text, style = MaterialTheme.typography.headlineSmall)
-                    is RulesBlock.Heading -> Text(b.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                    is RulesBlock.Quote -> Text(rich(b.text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    is RulesBlock.Heading -> Text(b.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = Spacing.sm))
+                    is RulesBlock.Quote -> Text(rich(b.text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     is RulesBlock.Bullet -> Row { Text("• "); Text(rich(b.text), style = MaterialTheme.typography.bodyMedium) }
                     is RulesBlock.Para -> Text(rich(b.text), style = MaterialTheme.typography.bodyMedium)
                     is RulesBlock.Table -> Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(8.dp)) {
+                        Column(Modifier.padding(Spacing.sm)) {
                             TableRow(b.header, header = true)
                             b.rows.forEach { HorizontalDivider(); TableRow(it, header = false) }
                         }
@@ -170,11 +192,11 @@ fun PointsRulesScreen(onBack: () -> Unit) {
 
 @Composable
 private fun TableRow(cells: List<String>, header: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    Row(Modifier.fillMaxWidth().padding(vertical = Spacing.sm)) {
         cells.forEachIndexed { i, c ->
             Text(
                 rich(c),
-                modifier = Modifier.weight(if (i == 0) 1.4f else 1f).padding(horizontal = 4.dp),
+                modifier = Modifier.weight(if (i == 0) 1.4f else 1f).padding(horizontal = Spacing.xs),
                 style = if (header) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium,
             )
         }

@@ -76,9 +76,19 @@ data class Me(
     @SerialName("registered_via") val registeredVia: String = "invite",
     @SerialName("leaderboard_anonymous") val leaderboardAnonymous: Boolean = false,
     @SerialName("invites_remaining") val invitesRemaining: Int = 0,
+    /** v2：当前生效的处罚（管理员禁言 / 全站禁发），api.yaml Me.restrictions。 */
+    val restrictions: List<Restriction> = emptyList(),
 ) {
     val isAdmin: Boolean get() = role == "admin"
 }
+
+/** api.yaml Me.restrictions 的一项：kind = mute（禁言）/ post_ban（全站禁发）。 */
+@Serializable
+data class Restriction(
+    val kind: String,
+    @SerialName("ends_at") val endsAt: String? = null,
+    val reason: String = "",
+)
 
 @Serializable
 data class MePatch(
