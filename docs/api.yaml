@@ -1450,6 +1450,7 @@ components:
         status: {type: string, enum: [pending, applied, rejected, reverted, expired]}
         votes: {type: integer}
         needed_votes: {type: integer, const: 3}
+        voted_by_me: {type: boolean, description: v2：当前用户是否已对这条提议投过同意票（提议人本人为 true）}
 
     PointsEntry:
       type: object
