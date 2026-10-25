@@ -56,6 +56,7 @@ class AiJobTrackerTest {
         /** jobId → 每次 GET 返回的状态序列（用完后重复最后一个）。 */
         val script = mutableMapOf<Int, ArrayDeque<AiJob>>()
         val notFound = mutableSetOf<Int>()
+        val offline = mutableSetOf<Int>()
         override suspend fun create(kind: String, classId: Int?, input: JsonObject): AiJob {
             creates++
             lastInputs += input
@@ -63,6 +64,7 @@ class AiJobTrackerTest {
         }
         override suspend fun get(jobId: Int): AiJob {
             gets++
+            if (jobId in offline) throw java.io.IOException("offline")
             if (jobId in notFound) throw HttpException(Response.error<Any>(404, "{}".toResponseBody()))
             val q = script[jobId] ?: return AiJob(jobId, "x", "running")
             return if (q.size > 1) q.removeFirst() else q.first()
@@ -230,16 +232,94 @@ class AiJobTrackerTest {
         assertEquals(AiJobTracker.TIMEOUT_MESSAGE, s.message)
         assertTrue(st.saved.isEmpty())
         advanceTimeBy(10_000); runCurrent()
-        assertEquals("过期的不再查服务器", 0, b.gets)
+        assertEquals("过期的只在重开时查一次服务器，不再轮询", 1, b.gets)
         scope.cancel()
+    }
+
+    // ---- rc2 修复 3：过期任务重开先问服务器 ----
+
+    private fun TestScope.restoreOverdue(b: FakeBackend, kind: String = PARSE_TIMETABLE): Triple<AiJobTracker, FakeStore, CoroutineScope> {
+        val st = FakeStore(listOf(AiJobState(9, kind, mapOf("class_id" to "3"), createdAt = base - DEADLINE_MS - 60_000)))
+        val (t, scope) = tracker(b, st)
+        return Triple(t, st, scope)
+    }
+
+    @Test fun restoreOverdueButServerDoneShowsResult() = runTest {
+        val b = FakeBackend().apply { script[9] = ArrayDeque(listOf(done(9))) }
+        val (t, st, scope) = restoreOverdue(b)
+        t.restore()
+        val s = t.job(PARSE_TIMETABLE)!!
+        assertEquals(AiJobStatus.Done, s.status)
+        assertEquals("高等数学", t.timetableSlots(s).single().name)
+        assertEquals(mapOf("class_id" to "3"), s.context)
+        assertEquals("结果存下来等用户确认", listOf(9), st.saved.map { it.jobId })
+        // 按 24 小时保留规则：从现在起算，23 小时后重开仍在，25 小时后丢弃
+        val (kept23, _) = AiJobTracker.partitionRestored(st.saved, base + 23 * 3_600_000L)
+        assertEquals(1, kept23.size)
+        val (kept25, _) = AiJobTracker.partitionRestored(st.saved, base + 25 * 3_600_000L)
+        assertTrue(kept25.isEmpty())
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals("不再轮询", 1, b.gets)
+        scope.cancel()
+    }
+
+    @Test fun restoreOverdueButServerFailedShowsReason() = runTest {
+        val b = FakeBackend().apply { script[9] = ArrayDeque(listOf(AiJob(9, PARSE_ASSIGNMENT, "failed", error = "看不清"))) }
+        val (t, st, scope) = restoreOverdue(b, PARSE_ASSIGNMENT)
+        t.restore()
+        val s = t.job(PARSE_ASSIGNMENT)!!
+        assertEquals(AiJobStatus.Failed, s.status)
+        assertEquals("识别失败：看不清", s.message)
+        assertEquals(1, st.saved.size)
+        scope.cancel()
+    }
+
+    @Test fun restoreOverdueStillRunningExpiredNotFoundOrOfflineIsTimeout() = runTest {
+        for (setup in listOf<(FakeBackend) -> Unit>(
+            { it.script[9] = ArrayDeque(listOf(AiJob(9, PARSE_TIMETABLE, "queued"))) },
+            { it.script[9] = ArrayDeque(listOf(AiJob(9, PARSE_TIMETABLE, "running"))) },
+            { it.script[9] = ArrayDeque(listOf(AiJob(9, PARSE_TIMETABLE, "expired"))) },
+            { it.notFound += 9 },
+            { it.offline += 9 },
+        )) {
+            val b = FakeBackend().also(setup)
+            val (t, st, scope) = restoreOverdue(b)
+            t.restore()
+            val s = t.job(PARSE_TIMETABLE)!!
+            assertEquals(AiJobStatus.Timeout, s.status)
+            assertEquals(AiJobTracker.TIMEOUT_MESSAGE, s.message)
+            assertTrue(st.saved.isEmpty())
+            assertEquals(1, b.gets)
+            scope.cancel()
+        }
+    }
+
+    @Test fun partitionSendsOverdueRunningToServerCheck() {
+        val fresh = AiJobState(1, PARSE_TIMETABLE, createdAt = base - 10_000)
+        val overdue = AiJobState(2, PARSE_ASSIGNMENT, createdAt = base - DEADLINE_MS)
+        val (kept, toCheck) = AiJobTracker.partitionRestored(listOf(fresh, overdue), base)
+        assertEquals(listOf(1), kept.map { it.jobId })
+        assertEquals(listOf(overdue), toCheck)
+    }
+
+    @Test fun resolveOverdueMapping() {
+        val s = AiJobState(5, PARSE_TIMETABLE, createdAt = base - DEADLINE_MS - 1)
+        fun r(status: String) = AiJobTracker.resolveOverdue(s, Result.success(AiJob(5, PARSE_TIMETABLE, status)), base).status
+        assertEquals(AiJobStatus.Done, r("done"))
+        assertEquals(AiJobStatus.Failed, r("failed"))
+        assertEquals(AiJobStatus.Timeout, r("queued"))
+        assertEquals(AiJobStatus.Timeout, r("running"))
+        assertEquals(AiJobStatus.Timeout, r("expired"))
+        assertEquals(AiJobStatus.Timeout, AiJobTracker.resolveOverdue(s, Result.failure(java.io.IOException()), base).status)
+        assertEquals(base, AiJobTracker.resolveOverdue(s, Result.success(AiJob(5, PARSE_TIMETABLE, "done")), base).finishedAt)
     }
 
     @Test fun restoreKeepsUntakenResultForADay() = runTest {
         val keep = AiJobState(1, PARSE_TIMETABLE, createdAt = base - 3_600_000, status = AiJobStatus.Done, output = JsonObject(mapOf("slots" to JsonArray(emptyList()))), finishedAt = base - 3_590_000)
         val old = AiJobState(2, PARSE_ASSIGNMENT, createdAt = base - RESULT_TTL_MS - 10_000, status = AiJobStatus.Done, finishedAt = base - RESULT_TTL_MS - 5_000)
-        val (kept, timedOut) = AiJobTracker.partitionRestored(listOf(keep, old), base)
+        val (kept, toCheck) = AiJobTracker.partitionRestored(listOf(keep, old), base)
         assertEquals(listOf(keep), kept)
-        assertTrue(timedOut.isEmpty())
+        assertTrue(toCheck.isEmpty())
     }
 
     @Test fun partitionKeepsLatestPerKind() {
