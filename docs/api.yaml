@@ -524,6 +524,7 @@ paths:
       description: |
         只有首发者（created_by）可改，否则 403 forbidden。改 DDL 时首发来源的 stated_ddl 一并更新、
         重算标红（任一来源声称的 DDL 与作业 DDL 相差 ≥ 1 分钟即标红）、清空 reminder_text；未给 ddl_uncertain 时改 DDL 视为已确认。
+        禁发期内（管理员全站禁发或该班禁发）403 post_banned，与发布一致（作者裁决 2026-10-25：禁发期间不能修改已发内容）。
       parameters: [{$ref: '#/components/parameters/AssignmentId'}]
       requestBody:
         content:
@@ -576,7 +577,7 @@ paths:
       summary: 作者编辑自己的来源
       description: |
         只改给出的字段；给了 attachment_ids 则整体替换附件（去掉的附件解绑，24 小时后清理）。stated_ddl 变化会重算标红。
-        非作者 403 forbidden。
+        非作者 403 forbidden；禁发期内（管理员全站禁发或该班禁发）403 post_banned（作者裁决 2026-10-25）。
       parameters: [{$ref: '#/components/parameters/SourceId'}]
       requestBody:
         content:
@@ -893,7 +894,7 @@ paths:
       tags: [admin]
       summary: 撤销班级自动合并
       description: |
-        按 class_merges.snapshot 把时段、作业、贡献值流水、禁发记录、子合并班搬回 from，from 成员按快照重建，
+        按 class_merges.snapshot 把时段、作业、贡献值流水、禁发记录、频道消息、子合并班搬回 from，from 成员按快照重建，
         into 中因合并新增的成员移除、原成员恢复合并前状态，into 课名/教师恢复；两个班的作业刷新 updated_at 供 /sync。
         已撤销 409 merge_closed；into 之后又被合并走 409 merge_chain。
       parameters:
@@ -1101,7 +1102,7 @@ paths:
   /admin/classes/merge:
     post:
       tags: [admin]
-      summary: 手动合并两个班（与自动合并同一套逻辑，写 class_merges，可用 /admin/class-merges/{merge_id}/revert 撤销）
+      summary: 手动合并两个班（与自动合并同一套逻辑：成员、时段、作业、贡献值流水、禁发记录、频道消息都并入，写 class_merges，可用 /admin/class-merges/{merge_id}/revert 撤销）
       description: 两班须同学期、都未隐藏，否则 409 merge_stale。返回新的 class_merges id。
       requestBody:
         required: true
