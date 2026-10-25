@@ -73,6 +73,7 @@ fun MainScreen(
     onPoints: () -> Unit = {},
     onRules: () -> Unit = {},
     onReminderGuide: () -> Unit = {},
+    onAdmin: () -> Unit = {},
     onOpenAiJob: (AiJobState, manual: Boolean) -> Unit = { _, _ -> },
     home: @Composable () -> Unit = { HomePlaceholder() },
     ai: AiJobsViewModel = hiltViewModel(),
@@ -109,7 +110,7 @@ fun MainScreen(
                 when (tab) {
                     MainTab.Home -> home()
                     MainTab.Timetable -> TimetableScreen(onImport, onManual, onOpenClass)
-                    MainTab.Me -> MeScreen(onSettings, onInvites, onLoggedOut, onPoints = onPoints, onRules = onRules, onReminderGuide = onReminderGuide)
+                    MainTab.Me -> MeScreen(onSettings, onInvites, onLoggedOut, onPoints = onPoints, onRules = onRules, onReminderGuide = onReminderGuide, onAdmin = onAdmin)
                 }
             }
         }

@@ -50,3 +50,16 @@
 - `data/repo/AiJobTracker`（@Singleton）跟踪 `parse_timetable` / `parse_assignment`；`MainScreen` 顶部状态条、识别结束的 Snackbar、「AI 识别」通知都从它读。
 - 点状态条 / Snackbar / 通知：课表 → `TimetableImport`（失败「手动添加」→ `TimetableManual`）；作业 → `Publish(class_id, assignment_id, source_id)`（取自任务 context）。逻辑在 `ui/main/MainScreen.kt` 的 `openAiJob`。
 - 通知点击：`MainActivity` 读 `ai_job_kind` extra → `DeepLinks.openAi(kind)` → `AiJobSnackbarOverlay` 导航。
+
+## 管理（WS11，v2）
+| 路由 | 页面 |
+|---|---|
+| `Admin` | 管理（Tab：举报 / 班级 / 用户 / 已删除 / 公告 / 操作日志），`ui/admin/AdminScreen` |
+| `AdminUserDetail(id)` | 用户详情（只展示 `AdminUser` 字段）：处罚 / 解除、改昵称、调贡献值 |
+
+- 入口：「我的」页的「管理」，只有 `/me.role == admin`（`showAdminEntry`）时出现；`MainScreen(onAdmin = …)` → `MeScreen(onAdmin = …)`。
+- 路由层拦截：两个路由都包在 `AdminGate` 里，进入时重新拉 `/me`，不是管理员只显示「只有管理员可以进入这里」，不会组合任何管理页面、不调用任何 `/admin` 接口（服务器另有 403）。
+- 接口：`data/api/AdminApi`（只含 api.yaml 的 `/admin/*`，没有任何浏览频道的接口）+ `ui/admin/AdminRepository`（用注入的 Retrofit 自己 create，不改 `di/`）。
+- 破坏性操作（删除内容、隐藏班级、合并班级、处罚、改昵称、改班名、调贡献值）统一用 `ReasonConfirmDialog` = `ui/common/ConfirmDialog` + 必填「原因」（1–200 字，空的不能确认）。
+- 举报处置：删除内容 / 隐藏班级 / 处罚用户 / 驳回，成功后自动 `POST /admin/reports/{id}/resolve`（驳回 = dismissed，其余 = removed）。来源/消息的举报里只有作者昵称、班级名，处罚和隐藏前先按昵称（全站唯一）/ 班名查到对象。
+- 「举报这个人」：作业详情来源卡片的昵称/「更多」、频道消息的昵称/长按菜单；`Source.author_id` / `Message.author_id` 缺失时不显示（`userReportTarget`）。

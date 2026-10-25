@@ -30,6 +30,8 @@ data class Source(
     val id: Int,
     val kind: String = "supplement",
     @SerialName("author_nickname") val authorNickname: String = "",
+    /** v2：作者用户 id（api.yaml Source.author_id，用于「举报这个人」）。服务器没带时为 null，不显示该入口。 */
+    @SerialName("author_id") val authorId: Int? = null,
     /** v2：是否我发的（服务器按用户 id 判断，不按昵称）。 */
     @SerialName("is_mine") val isMine: Boolean = false,
     val body: String = "",
@@ -203,6 +205,8 @@ data class AiSpamOutput(val suspicious: Boolean = false, val category: String? =
 data class Message(
     val id: Long,
     @SerialName("class_id") val classId: Int = 0,
+    /** 作者用户 id（api.yaml Message.author_id，用于「举报这个人」）。服务器没带时为 null，不显示该入口。 */
+    @SerialName("author_id") val authorId: Int? = null,
     @SerialName("author_nickname") val authorNickname: String = "",
     @SerialName("is_mine") val isMine: Boolean = false,
     val body: String = "",
