@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.PersonOff
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -87,9 +89,7 @@ fun ChatTab(classId: Int, vm: ChatViewModel = hiltViewModel(key = "chat-$classId
                     vm.loadError != null && vm.messages.isEmpty() -> ErrorState(vm.loadError ?: "", onRetry = vm::loadLatest)
                     vm.messages.isEmpty() && vm.pending.isEmpty() ->
                         EmptyState("还没有人说话。班级频道只有本班同学看得到，消息保留 30 天。", icon = Icons.Outlined.Forum)
-                    else -> MessageList(vm, onDelete = { deleting = it }, onReport = {
-                        reporting = ReportTarget(ReportKind.Message, it.id, it.body.take(40))
-                    })
+                    else -> MessageList(vm, onDelete = { deleting = it }, onReport = { reporting = it })
                 }
             }
             vm.pollError?.let {
@@ -117,7 +117,7 @@ fun ChatTab(classId: Int, vm: ChatViewModel = hiltViewModel(key = "chat-$classId
 }
 
 @Composable
-private fun MessageList(vm: ChatViewModel, onDelete: (Message) -> Unit, onReport: (Message) -> Unit) {
+private fun MessageList(vm: ChatViewModel, onDelete: (Message) -> Unit, onReport: (ReportTarget) -> Unit) {
     val state = rememberLazyListState()
     // reverseLayout：索引 0 在最底部（最新）。显示顺序 = 发送中的（最新）→ 已确认的倒序。
     val pendingRev = vm.pending.asReversed()
@@ -140,7 +140,7 @@ private fun MessageList(vm: ChatViewModel, onDelete: (Message) -> Unit, onReport
             Bubble(nickname = "我", time = "发送中…", body = p.body, mine = true, pending = true)
         }
         items(msgsRev, key = { "m${it.id}" }) { m ->
-            MessageItem(m, onDelete = { onDelete(m) }, onReport = { onReport(m) })
+            MessageItem(m, onDelete = { onDelete(m) }, onReport = onReport)
         }
         if (vm.loadingOlder) {
             item(key = "older") {
@@ -160,8 +160,10 @@ private fun MessageList(vm: ChatViewModel, onDelete: (Message) -> Unit, onReport
 }
 
 @Composable
-private fun MessageItem(m: Message, onDelete: () -> Unit, onReport: () -> Unit) {
+private fun MessageItem(m: Message, onDelete: () -> Unit, onReport: (ReportTarget) -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    // 「举报这个人」：服务器带了 author_id（PR #19）且不是自己时才有
+    val userTarget = userReportTarget(m.authorId, m.authorNickname, m.isMine)
     Box(Modifier.fillMaxWidth()) {
         Bubble(
             nickname = if (m.isMine) "我" else m.authorNickname,
@@ -169,6 +171,8 @@ private fun MessageItem(m: Message, onDelete: () -> Unit, onReport: () -> Unit) 
             body = m.body,
             mine = m.isMine,
             onLongClick = { menu = true },
+            // 点别人的昵称也弹出同一个菜单（含「举报这个人」）
+            onNicknameClick = if (m.isMine) null else ({ menu = true }),
         )
         Box(Modifier.align(if (m.isMine) Alignment.TopEnd else Alignment.TopStart)) {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -180,10 +184,17 @@ private fun MessageItem(m: Message, onDelete: () -> Unit, onReport: () -> Unit) 
                     )
                 } else {
                     DropdownMenuItem(
-                        text = { Text("举报") },
+                        text = { Text("举报这条消息") },
                         leadingIcon = { Icon(Icons.Outlined.Flag, contentDescription = null) },
-                        onClick = { menu = false; onReport() },
+                        onClick = { menu = false; onReport(ReportTarget(ReportKind.Message, m.id, m.body.take(40))) },
                     )
+                    userTarget?.let { t ->
+                        DropdownMenuItem(
+                            text = { Text(REPORT_USER_LABEL) },
+                            leadingIcon = { Icon(Icons.Outlined.PersonOff, contentDescription = null) },
+                            onClick = { menu = false; onReport(t) },
+                        )
+                    }
                 }
             }
         }
@@ -192,7 +203,15 @@ private fun MessageItem(m: Message, onDelete: () -> Unit, onReport: () -> Unit) 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Bubble(nickname: String, time: String, body: String, mine: Boolean, pending: Boolean = false, onLongClick: (() -> Unit)? = null) {
+private fun Bubble(
+    nickname: String,
+    time: String,
+    body: String,
+    mine: Boolean,
+    pending: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
+    onNicknameClick: (() -> Unit)? = null,
+) {
     Column(
         Modifier.fillMaxWidth().alpha(if (pending) 0.6f else 1f),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
@@ -202,6 +221,7 @@ private fun Bubble(nickname: String, time: String, body: String, mine: Boolean, 
             listOf(nickname, time).filter { it.isNotEmpty() }.joinToString(" · "),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = if (onNicknameClick != null) Modifier.clickable(onClickLabel = "更多", onClick = onNicknameClick) else Modifier,
         )
         Surface(
             shape = Corners.Card,

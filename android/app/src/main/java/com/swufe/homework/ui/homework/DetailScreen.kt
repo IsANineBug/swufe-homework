@@ -82,6 +82,9 @@ import com.swufe.homework.ui.theme.semantic
 import com.swufe.homework.ui.chat.ReportDialog
 import com.swufe.homework.ui.chat.ReportKind
 import com.swufe.homework.ui.chat.ReportTarget
+import com.swufe.homework.ui.chat.REPORT_USER_LABEL
+import com.swufe.homework.ui.chat.userReportTarget
+import androidx.compose.material.icons.outlined.PersonOff
 
 /** 删除投票弹窗文案（requirements §七、workstreams WS5 第 4 条），原样展示。 */
 const val DELETE_VOTE_WARNING = "此功能用于删除错误或虚假的内容。达到人数后将删除该内容，并扣除发布者贡献值。请确认内容有误后再使用此功能。"
@@ -179,6 +182,8 @@ fun DetailScreen(
                         onEdit = { onEditSource(a.classId, a.id, s.id) },
                         onRemoveMine = { removingMine = s },
                         onReport = { reporting = ReportTarget(ReportKind.Source, s.id.toLong(), s.body.take(40)) },
+                        // 「举报这个人」：服务器带了 author_id（PR #19）且不是自己时才有
+                        onReportUser = userReportTarget(s.authorId, s.authorNickname, vm.isMine(s))?.let { t -> { reporting = t } },
                     )
                 }
             }
@@ -264,6 +269,7 @@ private fun SourceCard(
     onEdit: () -> Unit,
     onRemoveMine: () -> Unit,
     onReport: () -> Unit,
+    onReportUser: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
@@ -273,7 +279,8 @@ private fun SourceCard(
                 Text(
                     " ${s.authorNickname}" + (s.createdAt?.let { " · ${Ddl.display(it)}" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
+                    // 点昵称打开同一个菜单（别人的内容里有「举报」「举报这个人」）
+                    modifier = Modifier.weight(1f).clickable(enabled = !mine, onClickLabel = "更多") { menu = true },
                 )
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "更多") }
@@ -288,6 +295,13 @@ private fun SourceCard(
                                 leadingIcon = { Icon(Icons.Outlined.Flag, contentDescription = null) },
                                 onClick = { menu = false; onReport() },
                             )
+                            onReportUser?.let { f ->
+                                DropdownMenuItem(
+                                    text = { Text(REPORT_USER_LABEL) },
+                                    leadingIcon = { Icon(Icons.Outlined.PersonOff, contentDescription = null) },
+                                    onClick = { menu = false; f() },
+                                )
+                            }
                         }
                     }
                 }

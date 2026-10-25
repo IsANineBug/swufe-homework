@@ -51,6 +51,15 @@ enum class ReportKind(val api: String, val label: String) {
 /** [preview] 只用于弹窗里提示举报的是什么（如消息前几十个字），不上传。 */
 data class ReportTarget(val kind: ReportKind, val id: Long, val preview: String? = null)
 
+/**
+ * 「举报这个人」（用户昵称处）：target_kind=user、target_id=作者 id。
+ * 作者 id 缺失（服务器还没带 author_id）或是自己时返回 null，界面不显示入口。
+ */
+fun userReportTarget(authorId: Int?, nickname: String, isMine: Boolean): ReportTarget? =
+    if (authorId == null || authorId <= 0 || isMine) null else ReportTarget(ReportKind.User, authorId.toLong(), nickname.ifBlank { null })
+
+const val REPORT_USER_LABEL = "举报这个人"
+
 const val REPORT_REASON_MAX = 200
 const val REPORT_DONE_TEXT = "已举报，管理员会尽快处理。举报人只有管理员看得到。"
 const val ALREADY_REPORTED_TEXT = "你已经举报过，管理员处理中"
