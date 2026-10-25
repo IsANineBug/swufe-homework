@@ -24,6 +24,7 @@ import com.swufe.homework.ui.auth.LoginScreen
 import com.swufe.homework.ui.auth.RecoverScreen
 import com.swufe.homework.ui.auth.RecoveryCodeScreen
 import com.swufe.homework.ui.auth.RegisterScreen
+import com.swufe.homework.ui.chat.ClassReportMenu
 import com.swufe.homework.ui.common.CenterLoading
 import com.swufe.homework.ui.common.UpdateDialog
 import com.swufe.homework.ui.homework.ClassBody
@@ -161,6 +162,7 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
                         onPublish = { nav.navigate(Routes.Publish(classId)) },
                     )
                 },
+                actions = { classId -> ClassReportMenu(classId) },
             )
         }
         composable<Routes.AssignmentDetail> {

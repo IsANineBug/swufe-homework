@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -43,20 +45,31 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.swufe.homework.data.api.AssignmentSummary
 import com.swufe.homework.data.api.Leaderboard
 import com.swufe.homework.data.api.userMessage
 import com.swufe.homework.data.repo.AssignmentRepository
+import com.swufe.homework.data.repo.ChatReadStore
+import com.swufe.homework.ui.chat.ChatTab
 import com.swufe.homework.ui.common.ErrorText
 import com.swufe.homework.util.Ddl
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
 
 @HiltViewModel
-class ClassBodyViewModel @Inject constructor(private val repo: AssignmentRepository) : ViewModel() {
+class ClassBodyViewModel @Inject constructor(
+    private val repo: AssignmentRepository,
+    chatRead: ChatReadStore,
+) : ViewModel() {
+    /** 有未读频道消息的班级（「交流」Tab 上的小红点）。 */
+    val unreadClasses = chatRead.unreadClasses.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
     var classId = -1; private set
     var weekStart by mutableStateOf(Ddl.weekStart(Ddl.now().toLocalDate())); private set
     var items by mutableStateOf<List<AssignmentSummary>>(emptyList()); private set
@@ -114,13 +127,26 @@ fun ClassBody(classId: Int, onOpen: (Int) -> Unit, onPublish: () -> Unit, vm: Cl
     LaunchedEffect(classId) { vm.bind(classId) }
     LifecycleResumeEffect(Unit) { vm.onResume(); onPauseOrDispose { } }
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val unread by vm.unreadClasses.collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             TabRow(selectedTabIndex = tab) {
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("作业") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("榜单") })
+                Tab(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    text = {
+                        BadgedBox(badge = { if (classId in unread && tab != 1) Badge() }) { Text("交流") }
+                    },
+                )
+                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("榜单") })
             }
-            if (tab == 0) AssignmentsTab(vm, onOpen) else BoardTab(vm)
+            when (tab) {
+                0 -> AssignmentsTab(vm, onOpen)
+                // 频道只在这个 Tab 显示时存在于组合中，切走即停止轮询
+                1 -> ChatTab(classId)
+                else -> BoardTab(vm)
+            }
         }
         if (tab == 0) {
             ExtendedFloatingActionButton(
@@ -201,7 +227,7 @@ private fun BoardTab(vm: ClassBodyViewModel) {
         b?.rep?.let {
             ListItem(
                 headlineContent = { Text(it.displayName, fontWeight = FontWeight.SemiBold) },
-                overlineContent = { Text("课代表（本学期积分第一）") },
+                overlineContent = { Text("课代表（本学期贡献值第一）") },
             )
             HorizontalDivider()
         }

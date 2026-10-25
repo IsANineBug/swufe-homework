@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -71,6 +72,7 @@ fun TimetableScreen(
     val aiOnline by vm.aiOnline.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
+    val unread by vm.unreadClasses.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -84,7 +86,7 @@ fun TimetableScreen(
         when {
             classes.isNotEmpty() -> {
                 if (error != null) Box(Modifier.padding(horizontal = Spacing.lg)) { ErrorText(error) }
-                TimetableGrid(periods, buildBlocks(classes), onOpenClass)
+                TimetableGrid(periods, buildBlocks(classes), onOpenClass, unread)
             }
             refreshing -> LoadingState(message = "正在加载课表…")
             error != null -> ErrorState(error ?: "", onRetry = vm::refresh)
@@ -118,7 +120,7 @@ private fun ImportBar(aiOnline: Boolean, onImport: () -> Unit, onManual: () -> U
 }
 
 @Composable
-fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (Int) -> Unit) {
+fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (Int) -> Unit, unread: Set<Int> = emptySet()) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = AXIS_W)) {
             WEEKDAY_NAMES.forEach {
@@ -160,6 +162,8 @@ fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (
                             Text(b.name, color = OnCourseColor, style = MaterialTheme.typography.labelMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
                             Text(b.room, color = OnCourseColor, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
+                        // WS11：班级频道有未读消息
+                        if (b.classId in unread) Badge(Modifier.align(Alignment.TopEnd))
                     }
                 }
             }
