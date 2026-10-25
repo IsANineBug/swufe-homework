@@ -38,6 +38,7 @@ type attachmentView struct {
 type sourceView struct {
 	ID              int64            `json:"id"`
 	Kind            string           `json:"kind"`
+	AuthorID        int64            `json:"author_id"` // 作者用户 id（举报用户用）
 	AuthorNickname  string           `json:"author_nickname"`
 	IsMine          bool             `json:"is_mine"` // v2：按用户 id 判断，不按昵称
 	Body            string           `json:"body"`
@@ -112,7 +113,7 @@ func querySummaries(ctx context.Context, q store.Q, sqlTail string, args ...any)
 // loadSources 装载来源（含附件、谢谢数、本人是否谢过/投过删除）。where 的 $1 为当前用户 id。
 func (s *Server) loadSources(ctx context.Context, q store.Q, uid int64, where string, args ...any) ([]sourceView, error) {
 	all := append([]any{uid}, args...)
-	rows, err := q.Query(ctx, `SELECT s.id, s.kind, u.nickname, s.body, s.stated_ddl, s.created_at,
+	rows, err := q.Query(ctx, `SELECT s.id, s.kind, s.author_id, u.nickname, s.body, s.stated_ddl, s.created_at,
 		(SELECT count(*) FROM thanks t WHERE t.source_id = s.id),
 		EXISTS (SELECT 1 FROM thanks t WHERE t.source_id = s.id AND t.user_id = $1),
 		EXISTS (SELECT 1 FROM delete_votes v WHERE v.source_id = s.id AND v.user_id = $1),
@@ -131,7 +132,7 @@ func (s *Server) loadSources(ctx context.Context, q store.Q, uid int64, where st
 		var aid int64
 		var delAt *time.Time
 		var delWhy *string
-		if err := rows.Scan(&v.ID, &v.Kind, &v.AuthorNickname, &v.Body, &stated, &created,
+		if err := rows.Scan(&v.ID, &v.Kind, &v.AuthorID, &v.AuthorNickname, &v.Body, &stated, &created,
 			&v.ThanksCount, &v.ThankedByMe, &v.VotedDeleteByMe, &aid, &delAt, &delWhy, &v.IsMine); err != nil {
 			rows.Close()
 			return nil, err
