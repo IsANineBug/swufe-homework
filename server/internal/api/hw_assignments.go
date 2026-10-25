@@ -434,6 +434,10 @@ func (s *Server) patchAssignment(w http.ResponseWriter, r *http.Request) {
 		if !a.Writable {
 			return errClassArchived
 		}
+		// 禁发期间不能修改已发内容（作者裁决 2026-10-25）；不计入每日 5 条
+		if err := checkPostBan(ctx, tx, uid, a.ClassID, s.Now()); err != nil {
+			return err
+		}
 		ddlChanged = in.DDL != nil && !in.DDL.Equal(a.DDL)
 		if _, err := tx.Exec(ctx, `UPDATE assignments SET title = COALESCE($2, title), ddl = COALESCE($3, ddl),
 			ddl_uncertain = CASE WHEN $3::timestamptz IS NOT NULL THEN COALESCE($4, false) ELSE COALESCE($4, ddl_uncertain) END,
@@ -621,6 +625,10 @@ func (s *Server) patchSource(w http.ResponseWriter, r *http.Request) {
 		asgID = src.AssignmentID
 		if !src.Writable {
 			return errClassArchived
+		}
+		// 禁发期间不能修改已发内容（作者裁决 2026-10-25）；不计入每日 5 条
+		if err := checkPostBan(ctx, tx, uid, src.ClassID, s.Now()); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE assignment_sources SET body = COALESCE($2, body),
 			stated_ddl = CASE WHEN $4 THEN $3 ELSE stated_ddl END, edited_at = now() WHERE id = $1`,

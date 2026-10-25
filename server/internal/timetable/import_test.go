@@ -292,6 +292,9 @@ func TestImportMergeRecordsUndoSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if n := count(t, pool, `SELECT count(*) FROM class_merges WHERE jsonb_typeof(snapshot->'message_ids') = 'array'`); n != 1 {
+		t.Fatal("snapshot message_ids missing")
+	}
 	if from != newer || into != older || by != c || slots != 1 || members != 1 || intoMembers != 1 || intoName != "微观经济学" {
 		t.Fatalf("snapshot from=%d into=%d by=%d slots=%d members=%d into_members=%d name=%s", from, into, by, slots, members, intoMembers, intoName)
 	}

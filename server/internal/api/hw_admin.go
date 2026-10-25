@@ -289,6 +289,7 @@ type classMergeSnapshot struct {
 	AssignmentIDs   []int64        `json:"assignment_ids"`
 	PointsLedgerIDs []int64        `json:"points_ledger_ids"`
 	PostBanIDs      []int64        `json:"post_ban_ids"`
+	MessageIDs      []int64        `json:"message_ids"` // rc2 新增，旧快照无此键时为空
 	ChildClassIDs   []int64        `json:"child_class_ids"`
 	FromMembers     []memberRecord `json:"from_members"`
 	IntoMembers     []memberRecord `json:"into_members"`
@@ -304,7 +305,7 @@ type memberRecord struct {
 }
 
 // POST /admin/class-merges/{merge_id}/revert 撤销班级自动合并：按 class_merges 快照把时段、作业、贡献值流水、
-// 禁发记录、子合并班搬回 from，恢复双方成员与 into 的课名/教师。into 之后又被合并走时需先撤销后一次（409 merge_chain）。
+// 禁发记录、频道消息、子合并班搬回 from，恢复双方成员与 into 的课名/教师。into 之后又被合并走时需先撤销后一次（409 merge_chain）。
 func (s *Server) adminRevertClassMerge(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	mid, err := idParam(r, "merge_id")
@@ -351,6 +352,8 @@ func (s *Server) adminRevertClassMerge(w http.ResponseWriter, r *http.Request) {
 			{`UPDATE assignments SET class_id = $1, updated_at = now() WHERE id = ANY($2) AND class_id = $3`, snap.AssignmentIDs},
 			{`UPDATE points_ledger SET class_id = $1 WHERE id = ANY($2) AND class_id = $3`, snap.PointsLedgerIDs},
 			{`UPDATE post_bans SET class_id = $1 WHERE id = ANY($2) AND class_id = $3`, snap.PostBanIDs},
+			// 只搬回合并时记录的消息；合并后在保留班新发的留在保留班
+			{`UPDATE class_messages SET class_id = $1 WHERE id = ANY($2) AND class_id = $3`, snap.MessageIDs},
 			{`UPDATE classes SET merged_into = $1 WHERE id = ANY($2) AND merged_into = $3`, snap.ChildClassIDs},
 		}
 		for _, m := range moves {

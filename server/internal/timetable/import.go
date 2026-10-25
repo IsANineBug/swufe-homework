@@ -518,6 +518,8 @@ func MergeInto(ctx context.Context, tx pgx.Tx, from, into int64, triggeredBy *in
 		`UPDATE assignments SET class_id = $2, updated_at = now() WHERE class_id = $1`,
 		`UPDATE points_ledger SET class_id = $2 WHERE class_id = $1`,
 		`UPDATE post_bans SET class_id = $2 WHERE class_id = $1`,
+		// v2 频道消息随班并入（作者裁决 2026-10-25），撤销时按 snapshot.message_ids 搬回
+		`UPDATE class_messages SET class_id = $2 WHERE class_id = $1`,
 		`UPDATE classes SET merged_into = $2 WHERE merged_into = $1`,
 		`UPDATE classes SET merged_into = $2 WHERE id = $1`,
 	}
@@ -561,12 +563,14 @@ func uniq(ids []int64) []int64 {
 }
 
 // mergeSnapshotSQL 记录一次班级合并的撤销数据；字段说明见 db/schema.sql 的 class_merges。
+// message_ids（v2 频道消息 id，含已删除的）为 rc2 新增，之前的快照没有这个键，撤销时按空处理。
 const mergeSnapshotSQL = `INSERT INTO class_merges (from_class_id, into_class_id, triggered_by, snapshot)
 SELECT $1, $2, $3, jsonb_build_object(
   'slot_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM class_slots WHERE class_id = $1), '[]'),
   'assignment_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM assignments WHERE class_id = $1), '[]'),
   'points_ledger_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM points_ledger WHERE class_id = $1), '[]'),
   'post_ban_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM post_bans WHERE class_id = $1), '[]'),
+  'message_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM class_messages WHERE class_id = $1), '[]'),
   'child_class_ids', coalesce((SELECT jsonb_agg(id ORDER BY id) FROM classes WHERE merged_into = $1), '[]'),
   'from_members', coalesce((SELECT jsonb_agg(jsonb_build_object('user_id', user_id, 'joined_at', joined_at, 'left_at', left_at)
                    ORDER BY user_id) FROM class_members WHERE class_id = $1), '[]'),

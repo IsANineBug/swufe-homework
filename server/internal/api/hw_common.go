@@ -158,24 +158,33 @@ func classWritable(ctx context.Context, q store.Q, classID int64) error {
 	return nil
 }
 
-// checkCanPost 禁发（投票触发的单班禁发、v2 管理员全站禁发）与每日 5 条（Asia/Shanghai 日期，被删除的不计）。
-// 须在事务内调用，会拿本人发布锁。
-func checkCanPost(ctx context.Context, tx pgx.Tx, userID, classID int64, now time.Time) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2::int)`, postLockNS, userID); err != nil {
-		return err
-	}
-	if sc, err := activeSanction(ctx, tx, userID, "post_ban", now); err != nil {
+// checkPostBan 只校验禁发（v2 管理员全站禁发优先，其次投票触发的单班禁发），不计数、不拿锁。
+// 发布（经 checkCanPost）与修改已发内容（作者裁决 2026-10-25）共用。
+func checkPostBan(ctx context.Context, q store.Q, userID, classID int64, now time.Time) error {
+	if sc, err := activeSanction(ctx, q, userID, "post_ban", now); err != nil {
 		return err
 	} else if sc != nil {
 		return errPostBannedGlobal
 	}
 	var banned bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM post_bans WHERE user_id = $1 AND class_id = $2
+	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM post_bans WHERE user_id = $1 AND class_id = $2
 		AND lifted_at IS NULL AND starts_at <= $3 AND ends_at > $3)`, userID, classID, now).Scan(&banned); err != nil {
 		return err
 	}
 	if banned {
 		return errPostBanned
+	}
+	return nil
+}
+
+// checkCanPost 禁发（见 checkPostBan）与每日 5 条（Asia/Shanghai 日期，被删除的不计）。
+// 须在事务内调用，会拿本人发布锁。
+func checkCanPost(ctx context.Context, tx pgx.Tx, userID, classID int64, now time.Time) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2::int)`, postLockNS, userID); err != nil {
+		return err
+	}
+	if err := checkPostBan(ctx, tx, userID, classID, now); err != nil {
+		return err
 	}
 	day := now.In(httpx.Shanghai)
 	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, httpx.Shanghai)
