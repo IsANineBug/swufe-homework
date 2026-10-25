@@ -170,17 +170,18 @@ enum class MergeVoteState {
     CanAccept,
     /** 可以「赞同」。 */
     CanVote,
-    /** 我提议的或已赞同过：「赞同」禁用（issue #8，避免 409 already_voted）。 */
+    /** 我提议的或已赞同过：显示「已同意」并禁用（issue #8，避免 409 already_voted）。 */
     Voted,
 }
 
 /**
- * 纯函数，便于单测。[votedLocally] = 本机提议过或赞同过的提议 id（api.yaml 的 MergeProposal 没有对应字段）；
+ * 纯函数，便于单测。以服务器的 MergeProposal.voted_by_me 为准（提议人本人为 true）；
+ * 服务器还没带这个字段（null）时回退到 [votedLocally] = 本机提议过或赞同过的提议 id（#15 的做法）。
  * [viewingFrom] = 当前详情页是提议里的 from 作业。
  */
 fun mergeVoteState(p: MergeProposal, votedLocally: Set<Int>, viewingFrom: Boolean, iAmFirstPoster: Boolean): MergeVoteState = when {
     viewingFrom && iAmFirstPoster -> MergeVoteState.CanAccept
-    p.id in votedLocally -> MergeVoteState.Voted
+    p.votedByMe ?: (p.id in votedLocally) -> MergeVoteState.Voted
     else -> MergeVoteState.CanVote
 }
 
