@@ -23,3 +23,5 @@
 2026-10-23 | PR #16 [WS10②] | 通过 (d6d7e41) | 无阻塞；后台识图/截图需真机验证；ClassBody.kt:204「积分」留给 WS11；2 个待作者裁决点
 2026-10-23 | PR #15 [WS11①] | 通过 (0c69d8b) | 无阻塞；清空 stated_ddl 下发 null 但服务器 PATCH /sources 区分不了 null（待 WS8 补）；voted_by_me 待作者裁决
 2026-10-23 | PR #15 [WS11①] (r2) | 通过 (8028d7a) | 合并 main 的 merge commit，WS10② 部分未被覆盖，无冲突标记；ClassBody.kt:204「积分」仍待 WS11 第 7 条
+2026-10-25 | #17 | 通过 | 无；accept 路径首发者 voted_by_me=false 符合契约
+2026-10-25 | #18 | 通过 | 用户昵称举报待作者裁决（契约缺作者 id）
