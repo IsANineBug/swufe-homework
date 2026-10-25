@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -94,5 +95,23 @@ class Ws11ModelsTest {
         assertEquals(MergeVoteState.CanAccept, mergeVoteState(p, votedLocally = emptySet(), viewingFrom = true, iAmFirstPoster = true))
         // 首发者同意不看票数：即使本机记过赞同，也仍可「同意」
         assertEquals(MergeVoteState.CanAccept, mergeVoteState(p, votedLocally = setOf(7), viewingFrom = true, iAmFirstPoster = true))
+    }
+
+    // ---- 合并提议 voted_by_me（字段缺失时回退到本机记录）----
+    @Test fun votedByMeFromServerWins() {
+        val v = p.copy(votedByMe = true)
+        assertEquals(MergeVoteState.Voted, mergeVoteState(v, votedLocally = emptySet(), viewingFrom = false, iAmFirstPoster = false))
+        // 服务器说没投过（例如本机记录是另一个账号留下的）：以服务器为准
+        val q = p.copy(votedByMe = false)
+        assertEquals(MergeVoteState.CanVote, mergeVoteState(q, votedLocally = setOf(7), viewingFrom = false, iAmFirstPoster = false))
+    }
+
+    @Test fun missingVotedByMeFallsBackToLocal() {
+        val old = json.decodeFromString(MergeProposal.serializer(), """{"id":7,"from_id":1,"to_id":2,"votes":1}""")
+        assertNull(old.votedByMe)
+        assertEquals(MergeVoteState.Voted, mergeVoteState(old, votedLocally = setOf(7), viewingFrom = false, iAmFirstPoster = false))
+        assertEquals(MergeVoteState.CanVote, mergeVoteState(old, votedLocally = emptySet(), viewingFrom = false, iAmFirstPoster = false))
+        val withField = json.decodeFromString(MergeProposal.serializer(), """{"id":7,"from_id":1,"to_id":2,"votes":1,"voted_by_me":true}""")
+        assertEquals(true, withField.votedByMe)
     }
 }

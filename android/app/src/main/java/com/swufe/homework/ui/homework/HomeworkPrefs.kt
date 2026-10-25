@@ -17,8 +17,8 @@ private val Context.homeworkPrefs by preferencesDataStore(name = "homework_prefs
 /**
  * WS11 的本地偏好（非敏感），单独一个 DataStore 文件，不改 WS4/WS10 的 SettingsStore。
  * - 首页上次选择的切换（今天/明天/本周/全部）；
- * - 我提议过 / 赞同过的合并提议 id：api.yaml 的 MergeProposal 没有「是否我提议 / 已赞同」字段，
- *   本机记住后把「赞同」按钮禁用（issue #8：提议者对自己的提议点赞同会得到 409 already_voted）。
+ * - 我提议过 / 赞同过的合并提议 id：v2 起以服务器的 MergeProposal.voted_by_me 为准；服务器还没带这个字段时
+ *   用本机记录把「赞同」按钮禁用（issue #8：提议者对自己的提议点赞同会得到 409 already_voted）。
  */
 @Singleton
 class HomeworkPrefs @Inject constructor(@ApplicationContext private val ctx: Context) {

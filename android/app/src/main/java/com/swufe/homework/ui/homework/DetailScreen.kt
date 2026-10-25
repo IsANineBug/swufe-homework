@@ -32,6 +32,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -78,6 +79,9 @@ import com.swufe.homework.ui.common.ConfirmDialog
 import com.swufe.homework.ui.common.ErrorText
 import com.swufe.homework.util.Ddl
 import com.swufe.homework.ui.theme.semantic
+import com.swufe.homework.ui.chat.ReportDialog
+import com.swufe.homework.ui.chat.ReportKind
+import com.swufe.homework.ui.chat.ReportTarget
 
 /** 删除投票弹窗文案（requirements §七、workstreams WS5 第 4 条），原样展示。 */
 const val DELETE_VOTE_WARNING = "此功能用于删除错误或虚假的内容。达到人数后将删除该内容，并扣除发布者贡献值。请确认内容有误后再使用此功能。"
@@ -102,6 +106,7 @@ fun DetailScreen(
     var deleting by remember { mutableStateOf<Source?>(null) }
     var removingMine by remember { mutableStateOf<Source?>(null) }
     var merging by rememberSaveable { mutableStateOf(false) }
+    var reporting by remember { mutableStateOf<ReportTarget?>(null) }
 
     Scaffold(
         topBar = {
@@ -154,9 +159,9 @@ fun DetailScreen(
                                             Button(onClick = { vm.acceptMerge(p.id) }) { Text("我是发布者，同意") }
                                         MergeVoteState.CanVote ->
                                             OutlinedButton(onClick = { vm.voteMerge(p.id) }) { Text("赞同 ${p.votes}/${p.neededVotes}") }
-                                        // 我提议的（提议人算第 1 票）或已赞同过：禁用，避免 409 already_voted
+                                        // 服务器 voted_by_me（提议人本人为 true）或本机记录：「已同意」并禁用，避免 409 already_voted
                                         MergeVoteState.Voted ->
-                                            OutlinedButton(onClick = {}, enabled = false) { Text("已赞同 ${p.votes}/${p.neededVotes}") }
+                                            OutlinedButton(onClick = {}, enabled = false) { Text("已同意 ${p.votes}/${p.neededVotes}") }
                                     }
                                 }
                             }
@@ -173,6 +178,7 @@ fun DetailScreen(
                         onDeleteVote = { deleting = s },
                         onEdit = { onEditSource(a.classId, a.id, s.id) },
                         onRemoveMine = { removingMine = s },
+                        onReport = { reporting = ReportTarget(ReportKind.Source, s.id.toLong(), s.body.take(40)) },
                     )
                 }
             }
@@ -180,6 +186,7 @@ fun DetailScreen(
     }
 
     viewing?.let { ImageViewer(it) { viewing = null } }
+    reporting?.let { t -> ReportDialog(t) { reporting = null } }
     deleting?.let { s -> DeleteVoteDialog(onConfirm = { deleting = null; vm.voteDelete(s) }, onDismiss = { deleting = null }) }
     removingMine?.let { s ->
         AlertDialog(
@@ -256,6 +263,7 @@ private fun SourceCard(
     onDeleteVote: () -> Unit,
     onEdit: () -> Unit,
     onRemoveMine: () -> Unit,
+    onReport: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
@@ -267,12 +275,19 @@ private fun SourceCard(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.weight(1f),
                 )
-                if (mine) {
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "更多") }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "更多") }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        if (mine) {
                             DropdownMenuItem(text = { Text("编辑") }, onClick = { menu = false; onEdit() })
                             DropdownMenuItem(text = { Text("删除") }, onClick = { menu = false; onRemoveMine() })
+                        } else {
+                            // v2 举报入口：作业来源（与「内容有误，投票删除」不同，交给管理员处理广告、辱骂等）
+                            DropdownMenuItem(
+                                text = { Text("举报") },
+                                leadingIcon = { Icon(Icons.Outlined.Flag, contentDescription = null) },
+                                onClick = { menu = false; onReport() },
+                            )
                         }
                     }
                 }

@@ -79,6 +79,28 @@ interface HomeworkApi {
 
     @GET("me/points")
     suspend fun points(@Query("cursor") cursor: String? = null): PointsPage
+
+    // ---- v2：班级频道（只在频道页可见时拉取，不用长连接）----
+
+    /** after_id 给出时返回 id > after_id 的最多 limit 条；否则最新 limit 条；before_id 往上翻。都按 id 升序。 */
+    @GET("classes/{class_id}/messages")
+    suspend fun messages(
+        @Path("class_id") classId: Int,
+        @Query("after_id") afterId: Long? = null,
+        @Query("before_id") beforeId: Long? = null,
+        @Query("limit") limit: Int? = null,
+    ): MessagesPage
+
+    /** 用 Response 拿 429 的 Retry-After 响应头。 */
+    @POST("classes/{class_id}/messages")
+    suspend fun sendMessage(@Path("class_id") classId: Int, @Body body: MessageCreate): Response<Message>
+
+    @DELETE("messages/{message_id}")
+    suspend fun deleteMessage(@Path("message_id") id: Long): Response<Unit>
+
+    // ---- v2：举报 ----
+    @POST("reports")
+    suspend fun report(@Body body: ReportCreate): Response<Unit>
 }
 
 /** 204 / 2xx 以外的 Response<Unit> 转成异常，交给 apiCall 统一处理。 */

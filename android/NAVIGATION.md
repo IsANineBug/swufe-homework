@@ -41,6 +41,11 @@
 |---|---|
 | `EditAssignment(id)` | 首发者编辑作业（标题、DDL → `PATCH /assignments/{id}`；说明 = 首发来源正文与图片 → `PATCH /sources/{id}`）。入口：作业详情顶栏「编辑」，仅 `Assignment.is_first_poster` 为真时显示 |
 
+## 班级频道与举报（WS11，v2，不加新路由）
+- 班级页 `ClassBody` 的 Tab：「作业 / 交流 / 榜单」。「交流」= `ui/chat/ChatTab`：进入拉最新 50 条；只在这个 Tab 在组合里且 Lifecycle ≥ STARTED 时每 12 秒 `after_id` 拉新（`pollWhileVisible`），切 Tab、离开、切后台立即停；往上翻 `before_id`。没有 WebSocket、前台服务或后台任务。
+- 小红点：`TimetableRepository.refreshClasses` 把 `/me/classes` 的 `last_message_id` 交给 `data/repo/ChatReadStore`（已读 id 存 DataStore `chat_prefs`）；课表色块与「交流」Tab 显示未读点。
+- 举报弹窗 `ui/chat/ReportDialog(ReportTarget)`（`POST /reports`，409 already_reported →「你已经举报过，管理员处理中」）。入口：作业详情来源卡片「更多 → 举报」、频道消息长按「举报」、班级页顶栏「更多 → 举报这个班」（`ClassPageScreen(actions = …)`）。
+
 ## 后台识图（WS10，v2）
 - `data/repo/AiJobTracker`（@Singleton）跟踪 `parse_timetable` / `parse_assignment`；`MainScreen` 顶部状态条、识别结束的 Snackbar、「AI 识别」通知都从它读。
 - 点状态条 / Snackbar / 通知：课表 → `TimetableImport`（失败「手动添加」→ `TimetableManual`）；作业 → `Publish(class_id, assignment_id, source_id)`（取自任务 context）。逻辑在 `ui/main/MainScreen.kt` 的 `openAiJob`。

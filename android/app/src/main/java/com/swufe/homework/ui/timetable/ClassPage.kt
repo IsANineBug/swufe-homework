@@ -74,6 +74,8 @@ fun ClassPageScreen(
     onBack: () -> Unit,
     onLeft: () -> Unit,
     body: @Composable (classId: Int) -> Unit = { ClassBodyPlaceholder() },
+    /** WS11：顶栏额外操作（「更多 → 举报这个班」），放在「不是我的班」之后。 */
+    actions: @Composable (classId: Int) -> Unit = {},
     vm: ClassHeaderViewModel = hiltViewModel(),
 ) {
     var confirm by rememberSaveable { mutableStateOf(false) }
@@ -81,6 +83,7 @@ fun ClassPageScreen(
         topBar = {
             BackTopBar(vm.info?.name ?: "班级", onBack) {
                 TextButton(onClick = { confirm = true }, enabled = !vm.leaving) { Text("不是我的班") }
+                actions(vm.classId)
             }
         },
     ) { pad ->

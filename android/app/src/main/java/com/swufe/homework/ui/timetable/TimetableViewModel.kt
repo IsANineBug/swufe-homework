@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.swufe.homework.data.api.ClassInfo
 import com.swufe.homework.data.api.Period
 import com.swufe.homework.data.api.userMessage
+import com.swufe.homework.data.repo.ChatReadStore
 import com.swufe.homework.data.repo.DEFAULT_PERIODS
 import com.swufe.homework.data.repo.TimetableRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,7 +26,13 @@ fun buildBlocks(classes: List<ClassInfo>): List<GridBlock> =
         .sortedWith(compareBy({ it.weekday }, { it.start }))
 
 @HiltViewModel
-class TimetableViewModel @Inject constructor(private val repo: TimetableRepository) : ViewModel() {
+class TimetableViewModel @Inject constructor(
+    private val repo: TimetableRepository,
+    chatRead: ChatReadStore,
+) : ViewModel() {
+    /** WS11：有未读频道消息的班级（/me/classes 的 last_message_id > 本地已读 id），课程色块右上角显示小红点。 */
+    val unreadClasses: StateFlow<Set<Int>> = chatRead.unreadClasses.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
     val classes: StateFlow<List<ClassInfo>> = repo.classes.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val periods: StateFlow<List<Period>> = repo.periods.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DEFAULT_PERIODS)
 
