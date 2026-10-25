@@ -34,6 +34,7 @@ class TimetableRepository @Inject constructor(
     private val api: SwufeApi,
     private val dao: TimetableDao,
     private val compressor: ImageCompressor,
+    private val chatRead: ChatReadStore,
 ) {
     val classes: Flow<List<ClassInfo>> = combine(dao.classes(), dao.slots()) { cs, ss ->
         val byClass = ss.groupBy { it.classId }
@@ -47,7 +48,12 @@ class TimetableRepository @Inject constructor(
         if (m.periods.isNotEmpty()) dao.insertPeriods(m.periods.map { PeriodEntity(it.no, it.start, it.end) })
     }
 
-    suspend fun refreshClasses(): Result<Unit> = apiCall { dao.replaceAll(api.myClasses()) }
+    /** WS11：顺带把各班 last_message_id 交给 [ChatReadStore]，课表上的频道小红点据此显示（不多发请求）。 */
+    suspend fun refreshClasses(): Result<Unit> = apiCall {
+        val list = api.myClasses()
+        dao.replaceAll(list)
+        chatRead.updateLatest(list)
+    }
 
     suspend fun classDetail(id: Int): Result<ClassInfo> = apiCall { api.classInfo(id) }
 

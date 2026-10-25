@@ -139,6 +139,8 @@ data class ClassInfo(
     val teacher: String? = null,
     val slots: List<Slot> = emptyList(),
     @SerialName("member_count") val memberCount: Int = 0,
+    /** v2：仅 /me/classes 返回，频道最新一条未删除消息 id；与本地「已读到」比较显示小红点（api.yaml Class.last_message_id）。 */
+    @SerialName("last_message_id") val lastMessageId: Long? = null,
 )
 
 @Serializable

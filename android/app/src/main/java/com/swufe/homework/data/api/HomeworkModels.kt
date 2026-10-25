@@ -51,6 +51,11 @@ data class MergeProposal(
     val status: String = "pending",
     val votes: Int = 0,
     @SerialName("needed_votes") val neededVotes: Int = 3,
+    /**
+     * v2：当前用户是否已对这条提议投过同意票（提议人本人为 true）。
+     * 服务器还没带这个字段时为 null，界面回退到本机记录（[com.swufe.homework.ui.homework.HomeworkPrefs.votedMerges]）。
+     */
+    @SerialName("voted_by_me") val votedByMe: Boolean? = null,
 )
 
 @Serializable
@@ -190,3 +195,34 @@ data class AiDedupeOutput(val matches: List<AiDedupeMatch> = emptyList())
 /** ai-contract.md §5 spam_check 输出。 */
 @Serializable
 data class AiSpamOutput(val suspicious: Boolean = false, val category: String? = null, val reason: String = "")
+
+// ---- v2：班级频道、举报（api.yaml tag chat）----
+
+/** api.yaml Message。id 用 Long（服务器 bigserial）。 */
+@Serializable
+data class Message(
+    val id: Long,
+    @SerialName("class_id") val classId: Int = 0,
+    @SerialName("author_nickname") val authorNickname: String = "",
+    @SerialName("is_mine") val isMine: Boolean = false,
+    val body: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+/** GET /classes/{id}/messages 的响应：items 按 id 升序；muted_until 非空表示我被禁言到何时。 */
+@Serializable
+data class MessagesPage(
+    val items: List<Message> = emptyList(),
+    @SerialName("muted_until") val mutedUntil: String? = null,
+)
+
+@Serializable
+data class MessageCreate(val body: String)
+
+/** POST /reports。target_kind：source / message / class / user；reason 1–200 字。 */
+@Serializable
+data class ReportCreate(
+    @SerialName("target_kind") val targetKind: String,
+    @SerialName("target_id") val targetId: Long,
+    val reason: String,
+)
