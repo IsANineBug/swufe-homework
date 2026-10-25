@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Surface
 import com.swufe.homework.data.api.Restriction
+import com.swufe.homework.ui.admin.showAdminEntry
 import com.swufe.homework.ui.common.ConfirmDialog
 import com.swufe.homework.ui.common.EmptyState
 import com.swufe.homework.ui.common.ErrorState
@@ -67,6 +68,7 @@ fun MeScreen(
     onPoints: () -> Unit = {},
     onRules: () -> Unit = {},
     onReminderGuide: () -> Unit = {},
+    onAdmin: () -> Unit = {},
     vm: MeViewModel = hiltViewModel(),
 ) {
     val me by vm.me.collectAsStateWithLifecycle()
@@ -96,6 +98,11 @@ fun MeScreen(
         SectionHeader("贡献值")
         NavRow("我的贡献值", "每一笔贡献值的来源", onPoints)
         NavRow("贡献值规则", null, onRules)
+        // WS11：只有 /me.role=admin 才出现「管理」入口（路由层另有 AdminGate 拦截）
+        if (showAdminEntry(me)) {
+            SectionHeader("管理")
+            NavRow("管理", "举报、班级、用户、已删除内容、公告、操作日志", onAdmin)
+        }
         SectionHeader("提醒与更新")
         NavRow("提醒设置", "通知、准时提醒、电池白名单", onReminderGuide)
         ListItem(

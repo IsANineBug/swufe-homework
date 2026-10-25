@@ -20,6 +20,9 @@ import com.swufe.homework.data.repo.AccountRepository
 import com.swufe.homework.data.repo.AuthRepository
 import com.swufe.homework.data.repo.UpdateInfo
 import com.swufe.homework.data.repo.UpdateRepository
+import com.swufe.homework.ui.admin.AdminGate
+import com.swufe.homework.ui.admin.AdminScreen
+import com.swufe.homework.ui.admin.AdminUserScreen
 import com.swufe.homework.ui.auth.LoginScreen
 import com.swufe.homework.ui.auth.RecoverScreen
 import com.swufe.homework.ui.auth.RecoveryCodeScreen
@@ -141,6 +144,7 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
                 onPoints = { nav.navigate(Routes.MyPoints) },
                 onRules = { nav.navigate(Routes.PointsRules) },
                 onReminderGuide = { nav.navigate(Routes.ReminderGuide) },
+                onAdmin = { nav.navigate(Routes.Admin) { launchSingleTop = true } },
                 onOpenAiJob = { s, manual -> nav.openAiJob(s, manual) },
                 home = { HomeScreen(onOpen = { nav.navigate(Routes.AssignmentDetail(it)) }) },
             )
@@ -195,6 +199,15 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
         composable<Routes.ReminderGuide> { ReminderGuideScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Settings> { SettingsScreen(onBack = { nav.popBackStack() }) }
         composable<Routes.Invites> { InvitesScreen(onBack = { nav.popBackStack() }) }
+        // WS11 管理：入口只在管理员的「我的」页出现；路由层再用 AdminGate 拦一次（重新拉 /me，非管理员看不到内容）
+        composable<Routes.Admin> {
+            AdminGate(onBack = { nav.popBackStack() }) {
+                AdminScreen(onBack = { nav.popBackStack() }, onOpenUser = { nav.navigate(Routes.AdminUserDetail(it)) })
+            }
+        }
+        composable<Routes.AdminUserDetail> {
+            AdminGate(onBack = { nav.popBackStack() }) { AdminUserScreen(onBack = { nav.popBackStack() }) }
+        }
     }
     // WS10 后台识图：识别结束的 Snackbar（非主界面时）与「AI 识别」通知点击
     if (loggedIn == true) AiJobSnackbarOverlay(nav, deepLinks)

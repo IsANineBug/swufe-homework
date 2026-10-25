@@ -37,6 +37,10 @@ object Routes {
     // ---- 我的（WS4）----
     @Serializable data object Settings
     @Serializable data object Invites
+
+    // ---- 管理（WS11，v2）：只有 /me.role=admin 可进，导航图里用 AdminGate 再拦一次 ----
+    @Serializable data object Admin
+    @Serializable data class AdminUserDetail(val id: Int)
 }
 
 /** 底部导航的三个 tab。WS5 实现 Home 的内容。 */
