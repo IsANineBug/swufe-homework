@@ -1401,6 +1401,7 @@ components:
       properties:
         id: {type: integer}
         kind: {type: string, enum: [first, supplement]}
+        author_id: {type: integer, description: v2：作者用户 id（用于举报用户 target_kind=user）}
         author_nickname: {type: string}
         is_mine: {type: boolean, description: v2：是否我发的（按用户 id，不按昵称）}
         body: {type: string}
@@ -1495,6 +1496,7 @@ components:
       properties:
         id: {type: integer}
         class_id: {type: integer}
+        author_id: {type: integer, description: 作者用户 id（用于举报用户 target_kind=user）}
         author_nickname: {type: string}
         is_mine: {type: boolean}
         body: {type: string}
