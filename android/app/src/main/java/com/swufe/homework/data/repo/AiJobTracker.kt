@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -109,7 +110,7 @@ private class DataStoreJobStore(private val ctx: Context, private val json: Json
  * - 只有 [PARSE_TIMETABLE]、[PARSE_ASSIGNMENT] 走这里；dedupe_review、spam_check 仍在调用处同步等待。
  * - 同一种任务每种最多一个：已有进行中的直接返回它，不新建（防重复点击）；已结束的被新任务替换。
  * - 在应用级 scope 里每 1.5 秒轮询，直到 createdAt + 150 秒（服务器 2 分钟过期，多留 30 秒给 worker 回传与网络）。
- * - [restore] 在 App 启动时调用：没过期的继续轮询，过期的标超时并从存储移除；已完成未取走的结果保留 [RESULT_TTL_MS]。
+ * - [restore] 在 App 启动时调用：没过期的继续轮询；过期的先 GET 一次服务器，done/failed 用服务器结果，其余（含断网）标超时并从存储移除；已完成未取走的结果保留 [RESULT_TTL_MS]。
  * - 确认页用 [take] 取走结果，用户放弃用 [dismiss]，两者都会从存储删除。
  * - 不用 WorkManager / 前台服务：进程被杀期间不轮询，重开后再查（服务器任务结束 24 小时内都能查到结果）。
  */
@@ -163,7 +164,7 @@ class AiJobTracker internal constructor(
             putJsonArray("attachment_ids") { attachmentIds.forEach { add(JsonPrimitive(it)) } }
         }
         apiCall { backend.create(kind, classId, input) }.map { created ->
-            val state = applyRemote(AiJobState(created.id, kind, context, now()), created)
+            val state = applyRemote(AiJobState(created.id, kind, context, now()), created, now())
             _jobs.value = _jobs.value.filterNot { it.kind == kind } + state
             persistLocked()
             if (state.status == AiJobStatus.Running) launchPoll(state.jobId) else _events.tryEmit(state)
@@ -203,10 +204,16 @@ class AiJobTracker internal constructor(
         if (restored) return
         restored = true
         val saved = runCatching { store.load() }.getOrDefault(emptyList())
-        val (kept, timedOut) = partitionRestored(saved, now())
+        val (kept, overdue) = partitionRestored(saved, now())
+        // 本地「进行中」但已过期限的：先问一次服务器再定（rc2 修复 3）
+        val checked = overdue.map { s ->
+            val remote = withTimeoutOrNull(OVERDUE_CHECK_TIMEOUT_MS) { apiCall { backend.get(s.jobId) } }
+                ?: Result.failure(java.io.IOException("timeout"))
+            resolveOverdue(s, remote, now())
+        }
         // 内存里已有的（理论上不会有）优先
         val mem = _jobs.value
-        val merged = mem + (kept + timedOut).filter { s -> mem.none { it.kind == s.kind } }
+        val merged = mem + (kept + checked).filter { s -> mem.none { it.kind == s.kind } }
         _jobs.value = merged.distinctBy { it.kind }
         persistLocked()
         _jobs.value.filter { it.status == AiJobStatus.Running }.forEach { launchPoll(it.jobId) }
@@ -236,7 +243,7 @@ class AiJobTracker internal constructor(
                     }
                     continue
                 }
-                val next = applyRemote(cur, r.getOrThrow())
+                val next = applyRemote(cur, r.getOrThrow(), now())
                 if (next.status != AiJobStatus.Running) {
                     finish(jobId) { next }
                     break
@@ -257,13 +264,6 @@ class AiJobTracker internal constructor(
         _events.tryEmit(done)
     }
 
-    private fun applyRemote(s: AiJobState, job: AiJob): AiJobState = when (job.status) {
-        "done" -> s.copy(status = AiJobStatus.Done, output = job.output ?: JsonObject(emptyMap()), finishedAt = now())
-        "failed" -> s.copy(status = AiJobStatus.Failed, error = job.error?.let { "识别失败：$it" } ?: "识别失败", finishedAt = now())
-        "expired" -> s.copy(status = AiJobStatus.Timeout, finishedAt = now())
-        else -> s
-    }
-
     companion object {
         const val KEY = "pending_ai_jobs"
         const val PARSE_TIMETABLE = "parse_timetable"
@@ -274,27 +274,46 @@ class AiJobTracker internal constructor(
         const val DEADLINE_MS = 150_000L
         /** 已完成但没去确认的结果在本机留多久（服务器任务结束 24 小时后删除）。 */
         const val RESULT_TTL_MS = 24 * 3600_000L
+        /** 重开时对过期任务查服务器的单次等待上限，超过按断网处理。 */
+        const val OVERDUE_CHECK_TIMEOUT_MS = 5_000L
         const val TIMEOUT_MESSAGE = "识别超时（超过 2 分钟），请手动添加"
 
         /**
-         * 启动恢复的纯逻辑：返回（继续跟踪的，标为超时的）。
-         * - 进行中且未到 createdAt + 150 秒：继续轮询；已到：标超时（不再存）。
+         * 启动恢复的纯逻辑：返回（继续跟踪的，需要问服务器的）。
+         * - 进行中且未到 createdAt + 150 秒：继续轮询；已到：原样放进第二组，由 [resolveOverdue] 按服务器结果定。
          * - 已完成/失败、未被取走：保留到结束后 [RESULT_TTL_MS]，之后丢弃。
          * - 同 kind 有多条时只留最新的一条。
          */
         internal fun partitionRestored(saved: List<AiJobState>, now: Long): Pair<List<AiJobState>, List<AiJobState>> {
             val latest = saved.groupBy { it.kind }.mapNotNull { (_, v) -> v.maxByOrNull { it.createdAt } }
             val kept = mutableListOf<AiJobState>()
-            val timedOut = mutableListOf<AiJobState>()
+            val overdue = mutableListOf<AiJobState>()
             for (s in latest) when (s.status) {
                 AiJobStatus.Running ->
-                    if (now < s.createdAt + DEADLINE_MS) kept += s
-                    else timedOut += s.copy(status = AiJobStatus.Timeout, finishedAt = now)
+                    if (now < s.createdAt + DEADLINE_MS) kept += s else overdue += s
                 AiJobStatus.Done, AiJobStatus.Failed ->
                     if (now < (s.finishedAt ?: s.createdAt) + RESULT_TTL_MS) kept += s
                 AiJobStatus.Timeout -> Unit
             }
-            return kept to timedOut
+            return kept to overdue
+        }
+
+        /**
+         * 重开时本地仍「进行中」但已过期限的任务，按一次 GET 的结果定状态：
+         * - done / failed：用服务器结果；done 从现在起按 [RESULT_TTL_MS] 保留给用户确认。
+         * - queued / running / expired、404、断网或其他错误：超时（断网时与原逻辑一致）。
+         */
+        internal fun resolveOverdue(s: AiJobState, remote: Result<AiJob>, now: Long): AiJobState {
+            val job = remote.getOrNull()
+            return if (job != null && (job.status == "done" || job.status == "failed")) applyRemote(s, job, now)
+            else s.copy(status = AiJobStatus.Timeout, finishedAt = now)
+        }
+
+        internal fun applyRemote(s: AiJobState, job: AiJob, now: Long): AiJobState = when (job.status) {
+            "done" -> s.copy(status = AiJobStatus.Done, output = job.output ?: JsonObject(emptyMap()), finishedAt = now)
+            "failed" -> s.copy(status = AiJobStatus.Failed, error = job.error?.let { "识别失败：$it" } ?: "识别失败", finishedAt = now)
+            "expired" -> s.copy(status = AiJobStatus.Timeout, finishedAt = now)
+            else -> s
         }
     }
 }
