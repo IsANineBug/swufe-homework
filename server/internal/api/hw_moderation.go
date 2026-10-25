@@ -211,7 +211,7 @@ func (s *Server) deleteModerated(ctx context.Context, tx pgx.Tx, src *srcRef, no
 func proposalIDParam(r *http.Request) (int64, error) { return idParam(r, "proposal_id") }
 
 func (s *Server) writeProposal(ctx context.Context, w http.ResponseWriter, r *http.Request, id int64, status int) {
-	ps, err := loadProposals(ctx, s.DB, `p.id = $1`, id)
+	ps, err := loadProposals(ctx, s.DB, currentUser(r).ID, `p.id = $2`, id)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

@@ -60,6 +60,7 @@ type mergeProposalView struct {
 	Status      string `json:"status"`
 	Votes       int    `json:"votes"`
 	NeededVotes int    `json:"needed_votes"`
+	VotedByMe   bool   `json:"voted_by_me"` // v2：当前用户已投同意票（提议人本人为 true）
 }
 
 type assignmentView struct {
@@ -176,10 +177,12 @@ func (s *Server) loadSources(ctx context.Context, q store.Q, uid int64, where st
 	return out, rows.Err()
 }
 
-func loadProposals(ctx context.Context, q store.Q, where string, args ...any) ([]mergeProposalView, error) {
+// loadProposals 的 $1 固定为当前用户 id（算 voted_by_me），where 里的参数从 $2 起。
+func loadProposals(ctx context.Context, q store.Q, uid int64, where string, args ...any) ([]mergeProposalView, error) {
 	rows, err := q.Query(ctx, `SELECT p.id, p.from_id, p.to_id, p.status,
-		(SELECT count(*) FROM merge_votes v WHERE v.proposal_id = p.id)
-		FROM merge_proposals p WHERE `+where+` ORDER BY p.id`, args...)
+		(SELECT count(*) FROM merge_votes v WHERE v.proposal_id = p.id),
+		p.proposer_id = $1 OR EXISTS (SELECT 1 FROM merge_votes v WHERE v.proposal_id = p.id AND v.user_id = $1)
+		FROM merge_proposals p WHERE `+where+` ORDER BY p.id`, append([]any{uid}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +190,7 @@ func loadProposals(ctx context.Context, q store.Q, where string, args ...any) ([
 	out := []mergeProposalView{}
 	for rows.Next() {
 		var m mergeProposalView
-		if err := rows.Scan(&m.ID, &m.FromID, &m.ToID, &m.Status, &m.Votes); err != nil {
+		if err := rows.Scan(&m.ID, &m.FromID, &m.ToID, &m.Status, &m.Votes, &m.VotedByMe); err != nil {
 			return nil, err
 		}
 		m.NeededVotes = mergeVotesNeeded
@@ -223,7 +226,7 @@ func (s *Server) loadAssignmentView(ctx context.Context, q store.Q, uid, id int6
 	if v.MergedFrom == nil {
 		v.MergedFrom = []int64{}
 	}
-	if v.PendingMerges, err = loadProposals(ctx, q, `p.status = 'pending' AND (p.from_id = $1 OR p.to_id = $1)`, id); err != nil {
+	if v.PendingMerges, err = loadProposals(ctx, q, uid, `p.status = 'pending' AND (p.from_id = $2 OR p.to_id = $2)`, id); err != nil {
 		return nil, err
 	}
 	return v, nil

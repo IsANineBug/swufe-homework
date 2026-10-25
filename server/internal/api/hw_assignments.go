@@ -464,9 +464,9 @@ func (s *Server) patchAssignment(w http.ResponseWriter, r *http.Request) {
 }
 
 type sourceInput struct {
-	Body          *string    `json:"body"`
-	StatedDDL     *time.Time `json:"stated_ddl"`
-	AttachmentIDs *[]int64   `json:"attachment_ids"`
+	Body          *string                   `json:"body"`
+	StatedDDL     httpx.Nullable[time.Time] `json:"stated_ddl"` // PATCH：显式 null 清空，没给保持不变
+	AttachmentIDs *[]int64                  `json:"attachment_ids"`
 }
 
 // POST /assignments/{assignment_id}/sources 补充：须有正文或附件；stated_ddl 与作业 DDL 不一致则标红。
@@ -519,7 +519,7 @@ func (s *Server) addSource(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO assignment_sources (assignment_id, original_assignment_id, author_id, kind, body, stated_ddl, created_at)
-			VALUES ($1, $1, $2, 'supplement', $3, $4, $5) RETURNING id`, a.ID, uid, body, in.StatedDDL, now).Scan(&sid); err != nil {
+			VALUES ($1, $1, $2, 'supplement', $3, $4, $5) RETURNING id`, a.ID, uid, body, in.StatedDDL.Ptr(), now).Scan(&sid); err != nil {
 			return err
 		}
 		if _, err := bindAttachments(ctx, tx, sid, uid, atts); err != nil {
@@ -624,7 +624,7 @@ func (s *Server) patchSource(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := tx.Exec(ctx, `UPDATE assignment_sources SET body = COALESCE($2, body),
 			stated_ddl = CASE WHEN $4 THEN $3 ELSE stated_ddl END, edited_at = now() WHERE id = $1`,
-			id, in.Body, in.StatedDDL, in.StatedDDL != nil); err != nil {
+			id, in.Body, in.StatedDDL.Ptr(), in.StatedDDL.Set); err != nil {
 			return err
 		}
 		if in.AttachmentIDs != nil {
