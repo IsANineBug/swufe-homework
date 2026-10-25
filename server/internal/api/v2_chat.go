@@ -36,6 +36,7 @@ const (
 type message struct {
 	ID             int64  `json:"id"`
 	ClassID        int64  `json:"class_id"`
+	AuthorID       int64  `json:"author_id"`
 	AuthorNickname string `json:"author_nickname"`
 	IsMine         bool   `json:"is_mine"`
 	Body           string `json:"body"`
@@ -110,7 +111,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := currentUser(r).ID
 	now := s.Now()
-	const cols = `SELECT m.id, m.class_id, u.nickname, m.user_id = $1, m.body, m.created_at
+	const cols = `SELECT m.id, m.class_id, m.user_id, u.nickname, m.user_id = $1, m.body, m.created_at
 		FROM class_messages m JOIN users u ON u.id = m.user_id
 		WHERE m.class_id = $2 AND m.deleted_at IS NULL AND m.created_at > $3 `
 	var rows pgx.Rows
@@ -151,7 +152,7 @@ func scanMessages(rows pgx.Rows) ([]message, error) {
 	for rows.Next() {
 		var m message
 		var at time.Time
-		if err := rows.Scan(&m.ID, &m.ClassID, &m.AuthorNickname, &m.IsMine, &m.Body, &at); err != nil {
+		if err := rows.Scan(&m.ID, &m.ClassID, &m.AuthorID, &m.AuthorNickname, &m.IsMine, &m.Body, &at); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = httpx.Time(at)
@@ -231,7 +232,7 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 			Scan(&out.ID, &at, &out.AuthorNickname); err != nil {
 			return err
 		}
-		out.ClassID, out.IsMine, out.Body, out.CreatedAt = cid, true, body, httpx.Time(at)
+		out.ClassID, out.AuthorID, out.IsMine, out.Body, out.CreatedAt = cid, uid, true, body, httpx.Time(at)
 		return nil
 	})
 	if errors.Is(err, errChatRateLimited) {
