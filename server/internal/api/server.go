@@ -31,6 +31,8 @@ type Server struct {
 	// WS2：文件 URL 签名、每人上传频率（每小时 60 次）
 	Files         *files.Signer
 	UploadLimiter *netx.Limiter
+	// 游客浏览（GET /guest/assignments）：按 IP 限流
+	GuestLimiter *netx.Limiter
 	// WS3：AI 任务。作业创建 / DDL 变更 / 新增或编辑来源后由 hw_assignments.go 触发
 	AI  *ai.Service
 	Now func() time.Time
@@ -46,6 +48,7 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 		FailLimiter:   netx.NewLimiter(LoginFailuresPerHour, time.Hour),
 		Files:         signer,
 		UploadLimiter: netx.NewLimiter(UploadsPerHour, time.Hour),
+		GuestLimiter:  netx.NewLimiter(GuestPerIPHour, time.Hour),
 		AI:            ai.New(cfg, db, signer), // 与 /files 共用签名器
 		Now:           time.Now,
 	}
@@ -73,6 +76,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/auth/refresh", s.refresh)
 		r.Post("/auth/recover", s.recover)
 		r.Get("/meta", s.meta)
+		// 游客浏览：随机样例作业，只读、匿名（guest.go）
+		r.Get("/guest/assignments", s.guestAssignments)
 
 		// worker（WORKER_TOKEN）
 		r.Group(func(r chi.Router) {

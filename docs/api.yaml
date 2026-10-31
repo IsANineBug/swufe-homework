@@ -180,6 +180,29 @@ paths:
                     items: {type: object, properties: {no: {type: integer}, start: {type: string}, end: {type: string}}}
                   server_time: {type: string, format: date-time}
 
+  /guest/assignments:
+    get:
+      tags: [assignments]
+      security: []
+      summary: 游客浏览：随机抽一批作业做展示（不登录、只读、匿名）
+      description: |
+        每次随机抽取最多 12 条作业，优先未过期的，不足用已过期的补齐，结果按 DDL 升序。
+        只包含未删除、未合并、班级未隐藏、首发者未封号的作业；每条最多 3 个来源（同样排除已删除和已封号作者的来源），
+        正文超过 600 字截断并加「…」。
+        作者一律换成本次结果内的代号（同学A、同学B…，同一作者在同一次结果里代号相同，不跨请求保持）；
+        不返回用户 id、昵称、附件链接（只给 attachment_count）、完成状态、谢谢/投票、举报与管理数据。
+        没有按 id 取单条的游客接口，详情直接用列表里的 sources 展示。
+        同一 IP 每小时最多 120 次，超出 429 rate_limited。服务器设 GUEST_PREVIEW=off 时 404 not_found。
+        响应带 Cache-Control: no-store。
+      responses:
+        "200":
+          description: ok（库里没有作业时为空数组）
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/GuestAssignment'}}
+        "404": {$ref: '#/components/responses/Error'}
+        "429": {$ref: '#/components/responses/Error'}
+
   /me:
     get:
       tags: [me]
@@ -1430,6 +1453,32 @@ components:
         source_count: {type: integer}
         reminder_text: {type: [object, "null"], description: "预生成文案 {2d|1d|12h: {title, body}}，可缺键；DDL 变更时清空，AI 重新生成后写回（见 ai-contract.md 第 6 节）"}
         updated_at: {type: string, format: date-time, description: /sync 增量依据}
+
+    GuestAssignment:
+      type: object
+      description: 游客浏览用的作业（匿名、只读），见 GET /guest/assignments
+      required: [id, class_name, title, ddl, ddl_uncertain, ddl_conflict, source_count, first_poster, sources]
+      properties:
+        id: {type: integer}
+        class_name: {type: string}
+        title: {type: string}
+        ddl: {type: string, format: date-time}
+        ddl_uncertain: {type: boolean}
+        ddl_conflict: {type: boolean}
+        source_count: {type: integer, description: 未删除来源总数（sources 最多只给 3 条）}
+        first_poster: {type: string, description: 首发者代号，如「同学A」}
+        sources:
+          type: array
+          items:
+            type: object
+            required: [kind, author, body, created_at, attachment_count]
+            properties:
+              kind: {type: string, enum: [first, supplement]}
+              author: {type: string, description: 作者代号，如「同学B」}
+              body: {type: string, description: 最多 600 字，超出截断}
+              stated_ddl: {type: [string, "null"], format: date-time}
+              created_at: {type: string, format: date-time}
+              attachment_count: {type: integer, description: 附件数量；游客看不到附件本身}
 
     Assignment:
       allOf:

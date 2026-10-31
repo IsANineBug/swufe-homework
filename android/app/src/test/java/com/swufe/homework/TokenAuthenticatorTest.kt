@@ -145,4 +145,20 @@ class TokenAuthenticatorTest {
         assertEquals(401, code)
         assertEquals(0, refreshCalls.get())
     }
+
+    @Test fun guestSampleSendsNoTokenAndNeverRefreshes() {
+        // 游客浏览是公开接口：即使本机还留着 token 也不带 Authorization，401 也不续期、不清登录态
+        var auth: String? = "unset"
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path == "/api/v1/auth/refresh") { refreshCalls.incrementAndGet(); MockResponse() }
+                else { auth = request.getHeader("Authorization"); MockResponse().setResponseCode(401) }
+        }
+        val t = FakeTokens("old-access", "old-refresh")
+        val code = client(t).newCall(Request.Builder().url(server.url("/api/v1/guest/assignments")).build()).execute().use { it.code }
+        assertEquals(401, code)
+        assertNull(auth)
+        assertEquals(0, refreshCalls.get())
+        assertEquals(0, t.cleared)
+    }
 }

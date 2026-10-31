@@ -49,7 +49,7 @@ fun DesignShowcase() {
             TopAppBar(title = { Text("视觉规范") })
             StatusBanner("课表识别中…", BannerTone.Progress)
             Box(Modifier.padding(top = 2.dp)) {
-                StatusBanner("课表识别好了", BannerTone.Success, actionLabel = "去确认 ›", onAction = {})
+                StatusBanner("课表识别好了", BannerTone.Success, actionLabel = "去确认", onAction = {})
             }
             Box(Modifier.padding(top = 2.dp)) {
                 StatusBanner("识别失败：AI 暂时不可用", BannerTone.Error, actionLabel = "手动添加", onAction = {})
@@ -83,7 +83,7 @@ fun DesignShowcase() {
                 Text("标签 labelSmall 12sp（最小字号）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            SectionHeader("卡片 16dp · 标签 8dp", actionLabel = "全部", onAction = {})
+            SectionHeader("卡片 16dp，标签 8dp", actionLabel = "全部", onAction = {})
             val now = Ddl.now()
             Column(Modifier.padding(horizontal = Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 AssignmentCard(
@@ -118,9 +118,9 @@ fun DesignShowcase() {
             }
 
             SectionHeader("空 / 加载 / 出错")
-            EmptyState("这周还没有作业", actionLabel = "发布作业", onAction = {}, fill = false)
+            EmptyState("这周还没有截止的作业。发布一条，同班同学都能看到。", title = "这周没有作业", actionLabel = "发布作业", onAction = {}, fill = false)
             LoadingState(skeleton = true, skeletonRows = 1, fill = false)
-            ErrorState("网络连接失败，请检查网络后重试", onRetry = {}, fill = false)
+            ErrorState("网络连接失败，请检查网络后重试", title = "作业没有加载出来", onRetry = {}, fill = false)
         }
     }
 }

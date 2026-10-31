@@ -32,6 +32,8 @@ type Config struct {
 	UploadDir     string
 	FileURLSecret []byte
 	FileURLTTL    time.Duration
+	// GuestPreviewOff GUEST_PREVIEW=off 时关闭游客浏览（/guest/assignments 返回 404）；默认开启
+	GuestPreviewOff bool
 }
 
 // DefaultTrustedProxy 只信任 docker 网络里固定 IP 的 nginx（与 WS6 docker-compose 约定）。
@@ -54,6 +56,7 @@ func Load() (*Config, error) {
 		FileURLSecret:       []byte(os.Getenv("FILE_URL_SECRET")),
 		FileURLTTL:          time.Hour,
 		WorkerToken:         os.Getenv("WORKER_TOKEN"),
+		GuestPreviewOff:     strings.EqualFold(os.Getenv("GUEST_PREVIEW"), "off"),
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL 未设置")

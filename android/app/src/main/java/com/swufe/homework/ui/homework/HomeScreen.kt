@@ -45,8 +45,11 @@ import com.swufe.homework.data.api.AssignmentSummary
 import com.swufe.homework.data.api.userMessage
 import com.swufe.homework.data.repo.AssignmentRepository
 import com.swufe.homework.data.repo.ReminderSync
+import com.swufe.homework.ui.common.BannerTone
 import com.swufe.homework.ui.common.EmptyState
-import com.swufe.homework.ui.common.ErrorText
+import com.swufe.homework.ui.common.ErrorState
+import com.swufe.homework.ui.common.LoadingState
+import com.swufe.homework.ui.common.StatusBanner
 import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.ui.theme.semantic
@@ -138,34 +141,43 @@ fun HomeScreen(onOpen: (Int) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             },
         )
         RangeTabs(selected = vm.range, onSelect = vm::selectRange)
-        ErrorText(vm.error)
-        PullToRefreshBox(isRefreshing = vm.loading, onRefresh = vm::refresh, modifier = Modifier.weight(1f)) {
+        val err = vm.error
+        // 已有内容时出错（刷新失败、勾选失败）：顶部状态条 + 重试，不清掉列表
+        if (err != null && vm.items.isNotEmpty()) {
+            StatusBanner(err, BannerTone.Error, actionLabel = "重试", onAction = vm::refresh)
+        }
+        PullToRefreshBox(isRefreshing = vm.loading && vm.loaded, onRefresh = vm::refresh, modifier = Modifier.weight(1f)) {
             val list = vm.visible
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.sm),
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-            ) {
-                if (vm.loaded && list.isEmpty()) {
-                    item(key = "empty") {
-                        EmptyState(
-                            HomeFilter.emptyMessage(vm.range, vm.showDone),
-                            icon = if (vm.range == HomeRange.All) Icons.Filled.Inbox else Icons.Filled.EventAvailable,
-                            actionLabel = if (vm.range != HomeRange.All) "看全部" else null,
-                            onAction = if (vm.range != HomeRange.All) ({ vm.selectRange(HomeRange.All) }) else null,
-                            fill = false,
-                            modifier = Modifier.padding(top = Spacing.xl),
-                        )
+            when {
+                // 首屏：与卡片同构的骨架，避免空白闪一下
+                !vm.loaded -> LoadingState(skeleton = true)
+                err != null && vm.items.isEmpty() -> ErrorState(err, title = "作业没有加载出来", onRetry = vm::refresh)
+                else -> LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    if (list.isEmpty()) {
+                        item(key = "empty") {
+                            EmptyState(
+                                HomeFilter.emptyMessage(vm.range, vm.showDone),
+                                icon = if (vm.range == HomeRange.All) Icons.Filled.Inbox else Icons.Filled.EventAvailable,
+                                actionLabel = if (vm.range != HomeRange.All) "看全部" else null,
+                                onAction = if (vm.range != HomeRange.All) ({ vm.selectRange(HomeRange.All) }) else null,
+                                fill = false,
+                                modifier = Modifier.padding(top = Spacing.xl),
+                            )
+                        }
                     }
-                }
-                items(list, key = { it.id }) { a ->
-                    SwipeDoneRow(a, onDone = { vm.setDone(a, !a.done) }) {
-                        AssignmentCard(
-                            a, showClass = true,
-                            onClick = { onOpen(a.id) },
-                            onToggleDone = { vm.setDone(a, it) },
-                            urgent = HomeFilter.isUrgent(a, vm.now),
-                        )
+                    items(list, key = { it.id }) { a ->
+                        SwipeDoneRow(a, onDone = { vm.setDone(a, !a.done) }) {
+                            AssignmentCard(
+                                a, showClass = true,
+                                onClick = { onOpen(a.id) },
+                                onToggleDone = { vm.setDone(a, it) },
+                                urgent = HomeFilter.isUrgent(a, vm.now),
+                            )
+                        }
                     }
                 }
             }
