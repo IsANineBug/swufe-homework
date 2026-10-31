@@ -30,6 +30,8 @@ import com.swufe.homework.ui.auth.RegisterScreen
 import com.swufe.homework.ui.chat.ClassReportMenu
 import com.swufe.homework.ui.common.CenterLoading
 import com.swufe.homework.ui.common.UpdateDialog
+import com.swufe.homework.ui.guest.GuestDetailScreen
+import com.swufe.homework.ui.guest.GuestHomeScreen
 import com.swufe.homework.ui.homework.ClassBody
 import com.swufe.homework.ui.homework.DetailScreen
 import com.swufe.homework.ui.homework.EditAssignmentScreen
@@ -112,6 +114,22 @@ fun AppNavHost(deepLinks: DeepLinks? = null, vm: AppViewModel = hiltViewModel())
                 onLoggedIn = { nav.goTo(Routes.Main) },
                 onRegister = { nav.navigate(Routes.Register) },
                 onRecover = { nav.navigate(Routes.Recover) },
+                onGuest = { nav.navigate(Routes.GuestHome) { launchSingleTop = true } },
+            )
+        }
+        // 游客浏览：不登录、只读，只有注册/登录两个出口（不进主界面，不碰 token）
+        composable<Routes.GuestHome> {
+            GuestHomeScreen(
+                onOpen = { nav.navigate(Routes.GuestDetail(it)) },
+                onRegister = { nav.navigate(Routes.Register) },
+                onLogin = { if (!nav.popBackStack()) nav.goTo(Routes.Login) },
+            )
+        }
+        composable<Routes.GuestDetail> { entry ->
+            GuestDetailScreen(
+                id = entry.toRoute<Routes.GuestDetail>().id,
+                onBack = { nav.popBackStack() },
+                onRegister = { nav.navigate(Routes.Register) },
             )
         }
         composable<Routes.Register> {

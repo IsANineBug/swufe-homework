@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EventAvailable
+import com.swufe.homework.ui.common.EmptyState
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
@@ -183,7 +185,7 @@ private fun AssignmentsTab(vm: ClassBodyViewModel, onOpen: (Int) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!vm.loading && vm.items.isEmpty()) {
-                item { Text("这一周没有截止的作业。", color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(16.dp)) }
+                item { EmptyState("这一周没有截止的作业。左右切换看看别的周，或者发布一条。", icon = Icons.Filled.EventAvailable, fill = false) }
             }
             byDay.forEach { (day, list) ->
                 item(key = "d-$day") {

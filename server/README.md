@@ -92,6 +92,7 @@ TEST_DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/hwtest?sslmode=disable
 | `POST /api/v1/auth/recover` | 恢复码重设密码，返回新恢复码，所有设备下线 |
 | `POST /api/v1/auth/logout` | `{refresh_token}` 只注销本机；`{all:true}` 注销全部设备 |
 | `GET /api/v1/meta` | 当前学期、12 节作息、服务器时间 |
+| `GET /api/v1/guest/assignments` | 游客浏览（不登录）：随机 12 条作业，作者匿名为「同学A」等，不含用户 id、附件链接、完成状态；每 IP 每小时 120 次；`GUEST_PREVIEW=off` 关闭 |
 | `GET/PATCH /api/v1/me` | 我的信息；改昵称、榜单匿名 |
 | `GET/POST /api/v1/me/invites` | 邀请码列表 / 生成（每人 5 个名额，未使用的也占） |
 | `GET /api/v1/me/notices` | 最近 100 条通知 |

@@ -91,14 +91,19 @@ Robolectric 原生绘图只支持 x86_64 Linux / macOS / Windows；不传 `-Pscr
 | 组件 | 什么时候用 |
 |---|---|
 | `LoadingState` | 首次加载、页面还没有内容时。默认居中进度；列表页传 `skeleton = true` 显示骨架行。已有内容再刷新用下拉刷新，不要整页换成它 |
-| `EmptyState` | 加载成功但没有数据（或筛选后为空）：图标 + 一句话 + 可选按钮（如「发布作业」）。不要只放一行灰字 |
-| `ErrorState` | 加载失败且没有可显示的旧内容：写清原因 + 「重试」。有旧内容时用 Snackbar 提示，保留内容 |
-| `StatusBanner` | 顶部状态条，跨页面的后台任务（识图）：`Progress` 进行中、`Success` 完成 +「去确认 ›」、`Error` 失败 + 补救操作 |
+| `EmptyState` | 加载成功但没有数据（或筛选后为空）：圆底图标 + 可选标题（`title`）+ 一句话 + 可选按钮（如「发布作业」）。文案写接下来能做什么。不要只放一行灰字 |
+| `ErrorState` | 加载失败且没有可显示的旧内容：可选标题 + 写清原因 + 「重试」。有旧内容时用 Snackbar 或顶部 `StatusBanner(Error)` 提示，保留内容 |
+| `StatusBanner` | 顶部状态条，跨页面的后台任务（识图）：`Progress` 进行中、`Success` 完成 +「去确认」、`Error` 失败 + 补救操作 |
 | `SectionHeader` | 列表里的分组小标题（今天 / 本周 / 设置分组），可带右侧「全部」等操作 |
 | `ConfirmDialog` | 需要二次确认的操作；破坏性操作 `destructive = true`；要冷静期的（删除投票）传 `countdownSeconds`，按钮显示「确认删除（3）」 |
 | `BackTopBar`、`FormColumn`、`LoadingButton`、`PasswordField`、`ErrorText` | 原有组件（`FormColumn`、`LoadingButton` 已改用 `Spacing` / `Corners`；`CenterLoading` 现等同 `LoadingState()`） |
 
 在 `LazyColumn` 里放空/错状态时用 `item { EmptyState(..., fill = false) }`。
+
+### 作业卡片与说明行（`ui/homework/HomeworkComponents.kt`）
+- `AssignmentCard`：左侧 `DateStub` 日期票根（月 / 大号日 / 时刻；24 小时内截止用 Urgent 底，已完成变灰），右侧课程、标题、剩余时间与标签。首页、班级页、游客浏览共用；`onToggleDone = null` 时不显示勾选框。
+- 说明信息不要用「·」拼成一行：时间与剩余时间用 `DdlLine`（分开排），署名用 `SourceByline`，其余用 `MetaTag` / `MetaTags` 标签。
+- 按钮文字后面不加「›」「→」。
 
 ## 已实现（WS4）
 - 注册：先 `/auth/campus-check`，非校园网要求邀请码；成功后强制展示恢复码，勾选「我已妥善保存」才能继续，屏蔽返回键。

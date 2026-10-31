@@ -13,6 +13,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -42,13 +51,29 @@ import com.swufe.homework.ui.theme.Spacing
 import androidx.activity.compose.BackHandler
 
 @Composable
-fun LoginScreen(onLoggedIn: () -> Unit, onRegister: () -> Unit, onRecover: () -> Unit, vm: LoginViewModel = hiltViewModel()) {
+fun LoginScreen(
+    onLoggedIn: () -> Unit,
+    onRegister: () -> Unit,
+    onRecover: () -> Unit,
+    onGuest: () -> Unit = {},
+    vm: LoginViewModel = hiltViewModel(),
+) {
     Scaffold { pad ->
         FormColumn(Modifier.padding(pad).verticalScroll(rememberScrollState()).imePadding()) {
             Spacer(Modifier.height(Spacing.xl * 2))
-            Text("西财作业", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text("同学共享作业和 DDL", style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(Spacing.xl))
+            Text(
+                "西财作业",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(
+                "同一门课的同学，一起把作业和 DDL 记清楚。",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(Spacing.lg))
             OutlinedTextField(vm.nickname, { vm.nickname = it }, label = { Text("昵称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             PasswordField(vm.password, { vm.password = it }, "密码")
             ErrorText(vm.error)
@@ -57,6 +82,33 @@ fun LoginScreen(onLoggedIn: () -> Unit, onRegister: () -> Unit, onRecover: () ->
                 TextButton(onClick = onRegister) { Text("注册新账号") }
                 TextButton(onClick = onRecover) { Text("忘记密码？用恢复码找回") }
             }
+            Spacer(Modifier.height(Spacing.sm))
+            GuestEntry(onGuest)
+        }
+    }
+}
+
+/** 登录页上的游客入口：整块可点，不注册先看一批随机的匿名作业。 */
+@Composable
+private fun GuestEntry(onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = Corners.Card,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Icon(Icons.Outlined.Visibility, contentDescription = null)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("先随便看看", style = MaterialTheme.typography.titleMedium)
+                Text("不用注册，看看同学们在共享哪些作业", style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
         }
     }
 }
