@@ -19,7 +19,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SnackbarHost
@@ -41,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.swufe.homework.data.api.AdminClass
@@ -54,6 +54,10 @@ import com.swufe.homework.ui.common.ErrorState
 import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
+import com.swufe.homework.ui.theme.semantic
+import com.swufe.homework.ui.homework.MetaTags
+import com.swufe.homework.ui.homework.SourceByline
+import com.swufe.homework.ui.homework.Tag
 import com.swufe.homework.util.Ddl
 import kotlinx.coroutines.launch
 
@@ -190,12 +194,7 @@ private fun ReportsTab(snack: SnackbarHostState, onOpenUser: (Int) -> Unit) {
                 extraValid = chosen > 0,
                 extra = {
                     if (d.candidates.size > 1) Text("有 ${d.candidates.size} 个同名的班，选一个：", style = MaterialTheme.typography.labelMedium)
-                    d.candidates.take(8).forEach { c ->
-                        Row(Modifier.fillMaxWidth().clickable { chosen = c.id }, verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = chosen == c.id, onClick = { chosen = c.id })
-                            Text(classLine(c), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+                    d.candidates.take(8).forEach { c -> ClassOption(c, selected = chosen == c.id) { chosen = c.id } }
                 },
             )
         }
@@ -214,31 +213,34 @@ private fun ReportsTab(snack: SnackbarHostState, onOpenUser: (Int) -> Unit) {
     }
 }
 
-internal fun classLine(c: AdminClass): String =
-    "${c.name}${c.teacher?.let { "（$it）" } ?: ""} · ${c.memberCount} 人 · ${c.assignmentCount} 份作业" +
-        (if (c.createdByNickname.isNotBlank()) " · 创建者 ${c.createdByNickname}" else "") + (if (c.hidden) " · 已隐藏" else "")
-
 @Composable
 private fun ReportCard(r: AdminReport, busy: Boolean, onAction: (ReportAction) -> Unit, onOpenUser: (Int) -> Unit) {
     var open by rememberSaveable(r.id) { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().clickable { open = !open }) {
         Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${reportKindLabel(r.targetKind)} · ${r.reporters.size} 人举报", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                if (r.handledAt != null) {
-                    Text("${resolutionLabel(r.resolution)} · ${Ddl.display(r.handledAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(reportKindLabel(r.targetKind), style = MaterialTheme.typography.titleSmall)
+                Tag("${r.reporters.size} 人举报", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+            }
+            if (r.handledAt != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Tag(resolutionLabel(r.resolution), MaterialTheme.semantic.successContainer, MaterialTheme.semantic.onSuccessContainer)
+                    Text(Ddl.display(r.handledAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             ReportTargetView(r, expanded = open, onOpenUser = onOpenUser)
             val shown = if (open) r.reporters else r.reporters.take(2)
             shown.forEach { p ->
-                Text(
-                    "${p.nickname}：${p.reason}" + (p.createdAt?.let { " · ${Ddl.display(it)}" } ?: ""),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = if (open) Int.MAX_VALUE else 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SourceByline(p.nickname, p.createdAt)
+                    Text(
+                        p.reason,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (open) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (!open && r.reporters.size > shown.size) {
                 Text("还有 ${r.reporters.size - shown.size} 条举报，点开查看", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -264,7 +266,7 @@ private fun ReportTargetView(r: AdminReport, expanded: Boolean, onOpenUser: (Int
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     when (r.targetKind) {
         "source" -> r.sourceTarget()?.let { t ->
-            Text("${t.className} · 作者 ${t.authorNickname}", style = MaterialTheme.typography.labelMedium, color = muted)
+            TargetByline(t.className, t.authorNickname, null)
             QuoteBlock {
                 Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     Text(t.body.ifBlank { "（无文字）" }, style = MaterialTheme.typography.bodyMedium, maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis)
@@ -279,7 +281,7 @@ private fun ReportTargetView(r: AdminReport, expanded: Boolean, onOpenUser: (Int
             }
         } ?: GoneText()
         "message" -> r.messageTarget()?.let { t ->
-            Text("${t.className} · 作者 ${t.authorNickname}" + (t.createdAt?.let { " · ${Ddl.display(it)}" } ?: ""), style = MaterialTheme.typography.labelMedium, color = muted)
+            TargetByline(t.className, t.authorNickname, t.createdAt)
             if (!expanded) {
                 QuoteBlock { Text(t.body, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis) }
             } else {
@@ -293,20 +295,36 @@ private fun ReportTargetView(r: AdminReport, expanded: Boolean, onOpenUser: (Int
             }
         } ?: GoneText()
         "class" -> r.classTarget()?.let { t ->
-            QuoteBlock {
-                Text("${t.name} · ${t.memberCount} 人 · ${t.assignmentCount} 份作业 · 创建者 ${t.createdByNickname}", style = MaterialTheme.typography.bodyMedium)
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Text(t.name, style = MaterialTheme.typography.bodyLarge)
+                MetaTags(
+                    listOfNotNull(
+                        "${t.memberCount} 人",
+                        "${t.assignmentCount} 份作业",
+                        "创建者 ${t.createdByNickname}".takeIf { t.createdByNickname.isNotBlank() },
+                    ),
+                )
             }
         } ?: GoneText()
         "user" -> r.userTarget()?.let { u ->
-            QuoteBlock {
-                Column(Modifier.clickable { onOpenUser(u.id) }) {
-                    Text(u.nickname, style = MaterialTheme.typography.titleSmall)
-                    Text(userSummary(u), style = MaterialTheme.typography.bodySmall, color = muted)
-                    Text("查看用户详情 ›", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Text(u.nickname, style = MaterialTheme.typography.bodyLarge)
+                MetaTags(userFacts(u))
+                TextButton(onClick = { onOpenUser(u.id) }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("查看用户详情") }
             }
         } ?: GoneText()
         else -> GoneText()
+    }
+}
+
+/** 被举报内容的出处：班名（主色小字）+ 作者与时间。 */
+@Composable
+private fun TargetByline(className: String, author: String, createdAt: String?) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (className.isNotBlank()) {
+            Text(className, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        SourceByline(author, createdAt)
     }
 }
 
@@ -319,15 +337,6 @@ private fun ContextLine(nick: String, body: String) {
 private fun GoneText() {
     Text("对象已不存在（可能已过保留期被清理）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
-
-/** 用户摘要：只用 AdminUser 的字段。 */
-internal fun userSummary(u: AdminUser): String = listOfNotNull(
-    if (u.isAdmin) "管理员" else null,
-    if (u.disabled) "已封号" else null,
-    "贡献值 ${u.contributionTotal}",
-    "近 30 天被删 ${u.deletedContent30d} 条",
-    "未处理举报 ${u.reportsAgainstOpen}",
-).joinToString(" · ")
 
 // ======================= 班级 =======================
 
@@ -421,16 +430,13 @@ const val ADMIN_CLASS_PAGE = 50
 @Composable
 private fun ClassCard(c: AdminClass, busy: Boolean, onHide: () -> Unit, onUnhide: () -> Unit, onRename: () -> Unit, onMerge: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Text(c.name + (c.teacher?.let { "（$it）" } ?: ""), style = MaterialTheme.typography.titleSmall)
-            Text(
-                "${c.semesterName} · ${c.memberCount} 人 · ${c.assignmentCount} 份作业 · ${c.slotCount} 个时段" +
-                    (if (c.createdByNickname.isNotBlank()) " · 创建者 ${c.createdByNickname}" else "") +
-                    (c.createdAt?.let { " · ${Ddl.display(it)}" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (c.hidden) Text("已隐藏", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+        Column(Modifier.padding(start = Spacing.lg, end = Spacing.lg, top = Spacing.md, bottom = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(classTitle(c), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f, fill = false))
+                if (c.hidden) Tag("已隐藏", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+            }
+            MetaTags(classFacts(c.copy(hidden = false)) + "${c.slotCount} 个时段")
+            c.createdAt?.let { Text("创建于 ${Ddl.display(it)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 TextButton(onClick = onRename, enabled = !busy) { Text("改名") }
                 if (!c.hidden) TextButton(onClick = onMerge, enabled = !busy) { Text("合并") }
@@ -461,7 +467,7 @@ private fun RenameClassDialog(c: AdminClass, onDismiss: () -> Unit, onConfirm: (
     )
 }
 
-/** 合并两个班：搜目标班 → 二次确认（必填原因），提示可在合并记录里撤销。 */
+/** 合并两个班：搜目标班，再二次确认（必填原因），提示可在合并记录里撤销。 */
 @Composable
 private fun MergeClassDialog(from: AdminClass, vm: AdminClassesViewModel, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -486,13 +492,8 @@ private fun MergeClassDialog(from: AdminClass, vm: AdminClassesViewModel, onDism
         extra = {
             SearchRow(q, { q = it }, "搜索要并入的班", onSearch = repoSearch, padded = false)
             err?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            if (results.isEmpty()) Text("没有可选的班", style = MaterialTheme.typography.bodySmall)
-            results.take(6).forEach { c ->
-                Row(Modifier.fillMaxWidth().clickable { into = c }, verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = into?.id == c.id, onClick = { into = c })
-                    Text(classLine(c), style = MaterialTheme.typography.bodySmall)
-                }
-            }
+            if (results.isEmpty()) Text("没有可选的班，换个班名再搜", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            results.take(6).forEach { c -> ClassOption(c, selected = into?.id == c.id) { into = c } }
             into?.let { Text("将把「${from.name}」并入「${it.name}」", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error) }
         },
     )
@@ -512,14 +513,11 @@ private fun MergesList(vm: AdminClassesViewModel, onRevert: (com.swufe.homework.
             item { Text("最近 100 次班级合并（自动和手动），含已撤销的。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(items, key = { it.id }) { m ->
                 Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.padding(start = Spacing.lg, end = Spacing.sm, top = Spacing.md, bottom = Spacing.md), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                            Text("「${m.fromName}」→「${m.intoName}」", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                listOfNotNull(m.triggeredByNickname?.let { "由 $it 触发" } ?: "管理员合并", m.createdAt?.let { Ddl.display(it) },
-                                    m.undoneAt?.let { "已于 ${Ddl.display(it)} 撤销" }).joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Text("「${m.fromName}」并入「${m.intoName}」", style = MaterialTheme.typography.titleSmall)
+                            SourceByline(m.triggeredByNickname?.let { "由 $it 触发" } ?: "管理员合并", m.createdAt)
+                            m.undoneAt?.let { Tag("已于 ${Ddl.display(it)} 撤销", MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                         if (m.undoneAt == null) TextButton(onClick = { onRevert(m) }, enabled = !vm.busy) { Text("撤销", color = MaterialTheme.colorScheme.error) }
                     }

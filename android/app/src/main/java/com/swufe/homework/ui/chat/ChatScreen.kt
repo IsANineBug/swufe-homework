@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -28,7 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -49,15 +50,19 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.swufe.homework.data.api.Message
+import com.swufe.homework.ui.common.BannerTone
 import com.swufe.homework.ui.common.ConfirmDialog
+import com.swufe.homework.ui.common.StatusBanner
 import com.swufe.homework.ui.common.EmptyState
 import com.swufe.homework.ui.common.ErrorState
 import com.swufe.homework.ui.common.LoadingState
-import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.util.Ddl
 import kotlinx.coroutines.flow.map
@@ -88,16 +93,11 @@ fun ChatTab(classId: Int, vm: ChatViewModel = hiltViewModel(key = "chat-$classId
                     vm.loading && vm.messages.isEmpty() -> LoadingState(message = "正在加载消息…")
                     vm.loadError != null && vm.messages.isEmpty() -> ErrorState(vm.loadError ?: "", onRetry = vm::loadLatest)
                     vm.messages.isEmpty() && vm.pending.isEmpty() ->
-                        EmptyState("还没有人说话。班级频道只有本班同学看得到，消息保留 30 天。", icon = Icons.Outlined.Forum)
+                        EmptyState("班级频道只有本班同学看得到，消息保留 30 天。在下面说第一句吧。", icon = Icons.Outlined.Forum, title = "还没有人说话")
                     else -> MessageList(vm, onDelete = { deleting = it }, onReport = { reporting = it })
                 }
             }
-            vm.pollError?.let {
-                Text(
-                    "刷新失败：$it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = Spacing.lg),
-                )
-            }
+            vm.pollError?.let { StatusBanner("刷新失败：$it", BannerTone.Error) }
             Composer(vm)
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = Spacing.xl * 3))
@@ -152,6 +152,7 @@ private fun MessageList(vm: ChatViewModel, onDelete: (Message) -> Unit, onReport
                     "更早的消息已不保留（频道只保留 30 天、每班最近 500 条）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.sm),
                 )
             }
@@ -217,14 +218,28 @@ private fun Bubble(
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
-        Text(
-            listOf(nickname, time).filter { it.isNotEmpty() }.joinToString(" · "),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = if (onNicknameClick != null) Modifier.clickable(onClickLabel = "更多", onClick = onNicknameClick) else Modifier,
-        )
+        // 昵称（较重）与时间（较轻）分开排，不用「·」拼接
+        Row(
+            modifier = (if (onNicknameClick != null) Modifier.clickable(onClickLabel = "更多", onClick = onNicknameClick) else Modifier)
+                .padding(horizontal = Spacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (nickname.isNotEmpty()) {
+                Text(nickname, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (time.isNotEmpty()) {
+                Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+        }
         Surface(
-            shape = Corners.Card,
+            // 靠近发言人一侧的上角收小，像气泡的「尾巴」
+            shape = RoundedCornerShape(
+                topStart = if (mine) BUBBLE_R else BUBBLE_TAIL,
+                topEnd = if (mine) BUBBLE_TAIL else BUBBLE_R,
+                bottomEnd = BUBBLE_R,
+                bottomStart = BUBBLE_R,
+            ),
             color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = if (mine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.widthIn(max = BUBBLE_MAX).let { mod ->
@@ -238,6 +253,8 @@ private fun Bubble(
 }
 
 private val BUBBLE_MAX = Spacing.xl * 12
+private val BUBBLE_R = 16.dp
+private val BUBBLE_TAIL = Spacing.xs
 
 @Composable
 private fun Composer(vm: ChatViewModel) {
@@ -281,7 +298,7 @@ private fun Composer(vm: ChatViewModel) {
                     },
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = vm::send, enabled = vm.canSend) {
+                FilledIconButton(onClick = vm::send, enabled = vm.canSend) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = if (vm.cooldown > 0) cooldownLabel(vm.cooldown) else "发送")
                 }
             }

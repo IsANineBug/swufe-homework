@@ -1,6 +1,7 @@
 package com.swufe.homework.ui.auth
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -42,6 +44,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.swufe.homework.ui.common.BackTopBar
+import com.swufe.homework.ui.common.BannerTone
+import com.swufe.homework.ui.common.InlineNotice
 import com.swufe.homework.ui.common.ErrorText
 import com.swufe.homework.ui.common.FormColumn
 import com.swufe.homework.ui.common.LoadingButton
@@ -118,16 +122,20 @@ fun RegisterScreen(onBack: () -> Unit, onRegistered: (String) -> Unit, vm: Regis
     Scaffold(topBar = { BackTopBar("注册", onBack) }) { pad ->
         FormColumn(Modifier.padding(pad).verticalScroll(rememberScrollState()).imePadding()) {
             when (vm.campus) {
-                null -> Text("正在检测是否在校园网…", style = MaterialTheme.typography.bodyMedium)
-                true -> Text("你正在使用西财校园网，可直接注册。", color = MaterialTheme.colorScheme.tertiary)
-                false -> Text("当前不在西财校园网，需要同学的邀请码才能注册。连上校园网后可免邀请码注册。", style = MaterialTheme.typography.bodyMedium)
+                null -> InlineNotice("正在检测是否在校园网…", BannerTone.Progress)
+                true -> InlineNotice("你正在使用西财校园网，可直接注册。", BannerTone.Success)
+                false -> InlineNotice(
+                    "当前不在西财校园网，需要同学的邀请码才能注册。连上校园网后可免邀请码注册。",
+                    BannerTone.Info,
+                    actionLabel = "重新检测",
+                    onAction = vm::checkCampus,
+                )
             }
             OutlinedTextField(vm.nickname, { vm.nickname = it.take(20) }, label = { Text("昵称（1–20 字，不需要实名）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             PasswordField(vm.password, { vm.password = it }, "密码（至少 8 位）")
             PasswordField(vm.password2, { vm.password2 = it }, "再输一次密码")
             if (vm.campus != true) {
                 OutlinedTextField(vm.inviteCode, { vm.inviteCode = it.trim() }, label = { Text("邀请码") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                if (vm.campus == false) TextButton(onClick = vm::checkCampus) { Text("已连上校园网？重新检测") }
             }
             ErrorText(vm.error)
             LoadingButton("注册", vm.loading, enabled = vm.campus != null) { vm.submit(onRegistered) }
@@ -139,7 +147,11 @@ fun RegisterScreen(onBack: () -> Unit, onRegistered: (String) -> Unit, vm: Regis
 fun RecoverScreen(onBack: () -> Unit, onRecovered: (String) -> Unit, vm: RecoverViewModel = hiltViewModel()) {
     Scaffold(topBar = { BackTopBar("用恢复码找回", onBack) }) { pad ->
         FormColumn(Modifier.padding(pad).verticalScroll(rememberScrollState()).imePadding()) {
-            Text("恢复码是注册时显示的 XXXX-XXXX-XXXX-XXXX。找回后会生成新的恢复码，旧的作废。", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "恢复码是注册时显示的 XXXX-XXXX-XXXX-XXXX。找回后会生成新的恢复码，旧的作废。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(vm.nickname, { vm.nickname = it }, label = { Text("昵称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(vm.code, { vm.code = it }, label = { Text("恢复码") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             PasswordField(vm.password, { vm.password = it }, "新密码（至少 8 位）")
@@ -172,7 +184,14 @@ fun RecoveryCodeScreen(
                 "这是你的恢复码。忘记密码时只能靠它找回账号，它只显示这一次，App 和服务器都不会再给你看。请抄下来或截图保存到安全的地方。",
                 style = MaterialTheme.typography.bodyLarge,
             )
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ),
+                shape = Corners.Card,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text(
                     code,
                     fontFamily = FontFamily.Monospace,
@@ -185,9 +204,13 @@ fun RecoveryCodeScreen(
             OutlinedButton(onClick = { clip.setText(AnnotatedString(code)); copied = true }, shape = Corners.Button, modifier = Modifier.fillMaxWidth()) {
                 Text(if (copied) "已复制" else "复制恢复码")
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(saved, { saved = it })
-                Text("我已妥善保存恢复码")
+            // 整行可点，勾选框不再是唯一的点击目标
+            Row(
+                Modifier.fillMaxWidth().toggleable(value = saved, role = Role.Checkbox, onValueChange = { saved = it }),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(saved, onCheckedChange = null, modifier = Modifier.padding(Spacing.md))
+                Text("我已妥善保存恢复码", style = MaterialTheme.typography.bodyLarge)
             }
             LoadingButton(if (fromRecover) "去登录" else "进入 App", loading = false, enabled = saved) {
                 vm.confirm(fromRecover, onConfirmed)

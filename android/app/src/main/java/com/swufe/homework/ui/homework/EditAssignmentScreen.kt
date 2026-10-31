@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
@@ -49,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.swufe.homework.ui.common.BackTopBar
+import com.swufe.homework.ui.common.BannerTone
+import com.swufe.homework.ui.common.InlineNotice
 import com.swufe.homework.ui.common.EmptyState
 import com.swufe.homework.ui.common.ErrorState
 import com.swufe.homework.ui.common.ErrorText
@@ -74,7 +79,7 @@ fun EditAssignmentScreen(onBack: () -> Unit, onDone: () -> Unit, vm: EditAssignm
         when {
             vm.loading -> { LoadingState(base); return@Scaffold }
             vm.forbidden -> {
-                EmptyState("只有首发这条作业的同学可以编辑。", base, actionLabel = "返回", onAction = onBack)
+                EmptyState("只有首发这条作业的同学可以编辑。", base, icon = Icons.Outlined.Lock, actionLabel = "返回", onAction = onBack, title = "不能编辑")
                 return@Scaffold
             }
             vm.error != null && vm.ddlDate == null -> { ErrorState(vm.error ?: "", onRetry = vm::load, modifier = base); return@Scaffold }
@@ -83,7 +88,12 @@ fun EditAssignmentScreen(onBack: () -> Unit, onDone: () -> Unit, vm: EditAssignm
             base.imePadding().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.xl, vertical = Spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {
-            vm.busy?.let { Column { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(it, style = MaterialTheme.typography.bodySmall) } }
+            vm.busy?.let {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
 
             OutlinedTextField(
                 vm.title, { vm.title = it.take(80) },
@@ -104,26 +114,18 @@ fun EditAssignmentScreen(onBack: () -> Unit, onDone: () -> Unit, vm: EditAssignm
             }
             vm.ddlDate?.let { d ->
                 val t = Ddl.at(d, vm.ddlTime ?: LocalTime.of(23, 59))
-                Text("${Ddl.display(t)} · ${Ddl.remaining(t)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                DdlLine(Ddl.toApi(t), conflict = false, uncertain = false)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = vm.ddlUncertain, onCheckedChange = { vm.ddlUncertain = it })
                 Text("DDL 待确认（拿不准时勾选，大家会看到「待确认」标签）", style = MaterialTheme.typography.bodySmall)
             }
-            Text(
-                "改 DDL 后，补充里看到的 DDL 与新 DDL 不同的会标红，大家的提醒按新时间重排。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            InlineNotice("改 DDL 后，补充里看到的 DDL 与新 DDL 不同的会标红，大家的提醒按新时间重排。", BannerTone.Info)
 
             HorizontalDivider()
             Text("说明", style = MaterialTheme.typography.titleSmall)
             if (vm.firstSource == null) {
-                Text(
-                    "首发内容已不在这条作业下（可能已被合并或删除），这里只能改标题和 DDL。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                InlineNotice("首发内容已不在这条作业下（可能已被合并或删除），这里只能改标题和 DDL。", BannerTone.Warning)
             } else {
                 OutlinedTextField(
                     vm.body, { vm.body = it.take(5000) },
@@ -136,7 +138,11 @@ fun EditAssignmentScreen(onBack: () -> Unit, onDone: () -> Unit, vm: EditAssignm
                     TextButton(
                         onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                         enabled = vm.imageCount < PublishViewModel.MAX_IMAGES && vm.busy == null,
-                    ) { Icon(Icons.Filled.AddPhotoAlternate, null); Text(" 选择图片") }
+                    ) {
+                        Icon(Icons.Filled.AddPhotoAlternate, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(Spacing.sm))
+                        Text("选择图片")
+                    }
                 }
                 if (vm.imageCount > 0) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {

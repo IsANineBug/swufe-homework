@@ -1,6 +1,9 @@
 package com.swufe.homework.ui.timetable
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,7 +18,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -28,7 +33,12 @@ import com.swufe.homework.ui.common.BackTopBar
 import com.swufe.homework.ui.common.ConfirmDialog
 import com.swufe.homework.ui.common.EmptyState
 import com.swufe.homework.ui.common.ErrorState
-import com.swufe.homework.ui.common.ErrorText
+import com.swufe.homework.ui.common.BannerTone
+import com.swufe.homework.ui.common.StatusBanner
+import com.swufe.homework.ui.homework.MetaTag
+import com.swufe.homework.ui.homework.MetaTags
+import com.swufe.homework.ui.theme.CourseColors
+import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.ui.nav.Routes
 import com.swufe.homework.util.weekdayName
@@ -91,7 +101,7 @@ fun ClassPageScreen(
             val info = vm.info
             if (info != null) {
                 ClassHeader(info)
-                vm.error?.let { Box(Modifier.padding(horizontal = Spacing.lg)) { ErrorText(it) } }
+                vm.error?.let { StatusBanner(it, BannerTone.Error) }
             } else if (vm.error != null) {
                 ErrorState(vm.error ?: "", onRetry = vm::reload, fill = false)
             }
@@ -114,14 +124,18 @@ fun ClassPageScreen(
 private fun ClassHeader(c: ClassInfo) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.sm),
-        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
-        c.slots.forEach { Text("${weekdayName(it.weekday)} 第 ${it.start}–${it.end} 节 · ${it.room}", style = MaterialTheme.typography.bodyMedium) }
-        Text(
-            listOfNotNull(c.teacher, "${c.memberCount} 位同学").joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // 每个时段一行：课表色条 + 「周三 第 3–4 节」+ 教室标签
+        val courseColor = CourseColors[Math.floorMod(c.id, CourseColors.size)]
+        c.slots.forEach {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Box(Modifier.size(width = 4.dp, height = 20.dp).background(courseColor, Corners.Tag))
+                Text("${weekdayName(it.weekday)} 第 ${it.start}–${it.end} 节", style = MaterialTheme.typography.bodyMedium)
+                if (it.room.isNotBlank()) MetaTag(it.room)
+            }
+        }
+        MetaTags(listOfNotNull(c.teacher?.takeIf { t -> t.isNotBlank() }, "${c.memberCount} 位同学"))
     }
 }
 
