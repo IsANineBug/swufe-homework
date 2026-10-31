@@ -249,6 +249,53 @@ fun StatusBanner(
     }
 }
 
+/**
+ * 页面内的提示块：和 [StatusBanner] 同一套语气配色，但是圆角卡片、文字可换行，放在表单或列表里。
+ * 例：注册页「你正在使用西财校园网」（Success）、识图结果「截图可能被裁掉」（Warning，带「再加一张」）、
+ * 识别拿不准时「标黄的请核对」（Warning）、AI 不可用（Info）。跨页面的后台任务仍用顶部 [StatusBanner]。
+ */
+@Composable
+fun InlineNotice(
+    text: String,
+    tone: BannerTone,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    val s = MaterialTheme.semantic
+    val cs = MaterialTheme.colorScheme
+    val (container: Color, content: Color) = when (tone) {
+        BannerTone.Progress, BannerTone.Info -> cs.secondaryContainer to cs.onSecondaryContainer
+        BannerTone.Success -> s.successContainer to s.onSuccessContainer
+        BannerTone.Warning -> s.warningContainer to s.onWarningContainer
+        BannerTone.Error -> cs.errorContainer to cs.onErrorContainer
+    }
+    Surface(
+        color = container,
+        contentColor = content,
+        shape = Corners.Card,
+        modifier = modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Row(
+            Modifier.padding(start = Spacing.lg, end = if (actionLabel != null) Spacing.sm else Spacing.lg, top = Spacing.md, bottom = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            when (tone) {
+                BannerTone.Progress -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = content)
+                BannerTone.Info -> Icon(Icons.Filled.Info, contentDescription = null, modifier = Modifier.size(20.dp))
+                BannerTone.Success -> Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp))
+                BannerTone.Warning -> Icon(Icons.Filled.WarningAmber, contentDescription = null, modifier = Modifier.size(20.dp))
+                BannerTone.Error -> Icon(Icons.Filled.ErrorOutline, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+            Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            if (actionLabel != null && onAction != null) {
+                TextButton(onClick = onAction) { Text(actionLabel, color = content) }
+            }
+        }
+    }
+}
+
 /** 分组标题：列表里的「今天」「本周」「设置」等小标题，可带右侧操作。 */
 @Composable
 fun SectionHeader(

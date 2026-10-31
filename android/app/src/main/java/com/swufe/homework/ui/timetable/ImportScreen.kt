@@ -10,11 +10,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Button
-import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
+import com.swufe.homework.ui.common.BannerTone
 import com.swufe.homework.ui.common.EmptyState
+import com.swufe.homework.ui.common.InlineNotice
+import com.swufe.homework.ui.homework.MetaTag
+import com.swufe.homework.ui.homework.MetaTags
 import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
@@ -134,7 +137,7 @@ private fun PickStage(vm: ImportViewModel) {
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (vm.images.isEmpty()) "选择截图" else "重新选择") }
         if (vm.images.isEmpty()) {
-            EmptyState("还没有选截图", icon = Icons.Filled.Image, fill = false)
+            EmptyState("一屏放不下就上下各截一张，最多 2 张。", icon = Icons.Filled.Image, fill = false, title = "还没有选截图")
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 vm.images.forEach {
@@ -143,7 +146,7 @@ private fun PickStage(vm: ImportViewModel) {
             }
         }
         if (vm.aiOnline == false && vm.error != AI_OFFLINE_MESSAGE) {
-            Text(AI_OFFLINE_MESSAGE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            InlineNotice(AI_OFFLINE_MESSAGE, BannerTone.Info)
         }
         ErrorText(vm.error)
         LoadingButton("开始识别", loading = false, enabled = vm.images.isNotEmpty() && vm.aiOnline != false) { vm.recognize() }
@@ -184,7 +187,9 @@ private fun ConfirmStage(vm: ImportViewModel, showSearch: Boolean) {
         }
         item {
             OutlinedButton(onClick = vm::addEmpty, shape = Corners.Button, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.Add, null); Text("添加一节")
+                Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(Spacing.xs))
+                Text("添加一节")
             }
         }
         item { ErrorText(vm.error) }
@@ -195,22 +200,12 @@ private fun ConfirmStage(vm: ImportViewModel, showSearch: Boolean) {
 /** 识别结果里有截断/被裁的课：建议补截另一半一起识别（最多 2 张）。 */
 @Composable
 private fun CroppedHint(canAdd: Boolean, onAdd: () -> Unit) {
-    val s = MaterialTheme.semantic
-    Surface(color = s.warningContainer, contentColor = s.onWarningContainer, shape = Corners.Card, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.padding(start = Spacing.lg, end = Spacing.sm, top = Spacing.md, bottom = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-        ) {
-            Icon(Icons.Filled.WarningAmber, contentDescription = null)
-            Text(
-                "截图上方/下方可能被裁掉，建议补截另一半一起识别",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            if (canAdd) TextButton(onClick = onAdd) { Text("再加一张", color = s.onWarningContainer) }
-        }
-    }
+    InlineNotice(
+        "截图上方/下方可能被裁掉，建议补截另一半一起识别",
+        BannerTone.Warning,
+        actionLabel = if (canAdd) "再加一张" else null,
+        onAction = if (canAdd) onAdd else null,
+    )
 }
 
 @Composable
@@ -233,7 +228,10 @@ private fun SearchRow(c: ClassInfo, onPick: () -> Unit) {
     ListItem(
         headlineContent = { Text(c.name) },
         supportingContent = {
-            Text(c.slots.joinToString("；") { "${weekdayName(it.weekday)} ${it.start}-${it.end}节 ${it.room}" } + "  · ${c.memberCount} 人")
+            Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                c.slots.forEach { Text("${weekdayName(it.weekday)} 第 ${it.start}–${it.end} 节  ${it.room}") }
+                MetaTag("${c.memberCount} 人已加入")
+            }
         },
         trailingContent = { OutlinedButton(onClick = onPick, shape = Corners.Button) { Text("添加") } },
     )
@@ -294,11 +292,17 @@ private fun Stepper(label: String, value: Int, highlight: Boolean, onChange: (In
 @Composable
 private fun ResultStage(vm: ImportViewModel, onDone: () -> Unit) {
     val r = vm.result ?: return
-    Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-        Text("已保存", style = MaterialTheme.typography.headlineSmall)
-        if (r.joined.isNotEmpty()) Text("加入已有班级 ${r.joined.size} 个：" + r.joined.joinToString("、") { it.name })
-        if (r.created.isNotEmpty()) Text("新建班级 ${r.created.size} 个：" + r.created.joinToString("、") { it.name })
-        if (r.merged.isNotEmpty()) Text("自动合并了 ${r.merged.size} 组重复的班级。")
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.semantic.success, modifier = Modifier.size(32.dp))
+            Text("已保存", style = MaterialTheme.typography.headlineSmall)
+        }
+        if (r.joined.isNotEmpty()) ResultGroup("加入已有班级 ${r.joined.size} 个", r.joined.map { it.name })
+        if (r.created.isNotEmpty()) ResultGroup("新建班级 ${r.created.size} 个", r.created.map { it.name })
+        if (r.merged.isNotEmpty()) Text("自动合并了 ${r.merged.size} 组重复的班级。", style = MaterialTheme.typography.bodyMedium)
         if (r.conflicts.isNotEmpty()) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                 Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
@@ -314,5 +318,14 @@ private fun ResultStage(vm: ImportViewModel, onDone: () -> Unit) {
         } else {
             LoadingButton("完成", loading = false, onClick = onDone)
         }
+    }
+}
+
+/** 结果页的一组班名：小标题 + 班名标签。 */
+@Composable
+private fun ResultGroup(title: String, names: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        MetaTags(names)
     }
 }

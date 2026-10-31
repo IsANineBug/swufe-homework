@@ -32,12 +32,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.swufe.homework.data.api.AdminDeletedSource
+import com.swufe.homework.ui.common.BannerTone
 import com.swufe.homework.ui.common.ConfirmDialog
+import com.swufe.homework.ui.common.InlineNotice
 import com.swufe.homework.ui.common.EmptyState
 import com.swufe.homework.ui.common.ErrorState
 import com.swufe.homework.ui.common.LoadingButton
 import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.theme.Spacing
+import com.swufe.homework.ui.homework.MetaTag
+import com.swufe.homework.ui.homework.SourceByline
+import com.swufe.homework.ui.homework.Tag
 import com.swufe.homework.util.Ddl
 
 // ======================= 已删除内容 =======================
@@ -67,15 +72,15 @@ internal fun DeletedTab(snack: SnackbarHostState) {
             item { Text("最近 30 天被投票或管理员删除的作业内容（最多 200 条）。恢复后返还贡献值。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(items, key = { it.id }) { s ->
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                        Text(
-                            listOfNotNull(deletedReasonLabel(s.deletedReason), "作者 ${s.authorNickname}", s.deletedAt?.let { Ddl.display(it) }).joinToString(" · "),
-                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        QuoteBlock {
-                            Text(s.body.ifBlank { "（无文字）" } + if (s.attachments.isNotEmpty()) "\n[${s.attachments.size} 张图片]" else "",
-                                style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                    Column(Modifier.padding(start = Spacing.lg, end = Spacing.lg, top = Spacing.md, bottom = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Tag(deletedReasonLabel(s.deletedReason), MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                            SourceByline(s.authorNickname, s.deletedAt, Modifier.weight(1f))
                         }
+                        QuoteBlock {
+                            Text(s.body.ifBlank { "（无文字）" }, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (s.attachments.isNotEmpty()) MetaTag("${s.attachments.size} 张图片")
                         if (s.deletedReason != "author") {
                             TextButton(onClick = { restoring = s }, enabled = !vm.busy) { Text("恢复") }
                         }
@@ -119,7 +124,7 @@ internal fun AnnounceTab(snack: SnackbarHostState) {
         OutlinedTextField(vm.body, { vm.body = it.take(2000) }, label = { Text("正文") }, minLines = 5, modifier = Modifier.fillMaxWidth())
         Text("几天后生效", style = MaterialTheme.typography.labelMedium)
         ChoiceChips(listOf(7L, 10L, 14L, 30L), vm.days, { "$it 天" }) { vm.days = it }
-        Text("生效时间：${Ddl.display(effective)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        InlineNotice("将于 ${Ddl.display(effective)} 生效", BannerTone.Info)
         LoadingButton("发布公告", vm.busy, enabled = vm.canPublish) { confirming = true }
     }
     if (confirming) {
@@ -149,14 +154,17 @@ internal fun ActionsTab() {
         ) {
             item { Text("最近 200 条管理操作，所有管理写操作都会记录。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(items, key = { it.id }) { a ->
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                    Text(
-                        "${actionLabel(a.action)} · ${reportKindLabel(a.targetKind)} #${a.targetId}" + (a.createdAt?.let { " · ${Ddl.display(it)}" } ?: ""),
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    a.reason?.takeIf { it.isNotBlank() }?.let { Text("原因：$it", style = MaterialTheme.typography.bodySmall) }
-                    a.payload?.toString()?.takeIf { it != "null" && it != "{}" }?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Text(actionLabel(a.action), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                            a.createdAt?.let { Text(Ddl.display(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                        MetaTag("${reportKindLabel(a.targetKind)} #${a.targetId}")
+                        a.reason?.takeIf { it.isNotBlank() }?.let { Text("原因：$it", style = MaterialTheme.typography.bodyMedium) }
+                        a.payload?.toString()?.takeIf { it != "null" && it != "{}" }?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
