@@ -1,6 +1,11 @@
 package com.swufe.homework.ui.me
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PersonAdd
@@ -30,6 +36,7 @@ import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.util.Ddl
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +57,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.swufe.homework.ui.homework.MetaTag
+import com.swufe.homework.ui.homework.Tag
+import com.swufe.homework.ui.theme.semantic
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.swufe.homework.BuildConfig
@@ -78,20 +91,14 @@ fun MeScreen(
         val m = me
         when {
             m != null -> {
-                ListItem(
-                    headlineContent = { Text(m.nickname, style = MaterialTheme.typography.titleLarge) },
-                    supportingContent = {
-                        val via = when (m.registeredVia) { "campus" -> "校园网注册"; "invite" -> "邀请注册"; "bootstrap" -> "初始账号"; else -> "" }
-                        Text(listOf(if (m.isAdmin) "管理员" else null, via.ifEmpty { null }).filterNotNull().joinToString(" · "))
-                    },
-                )
+                val via = when (m.registeredVia) { "campus" -> "校园网注册"; "invite" -> "邀请注册"; "bootstrap" -> "初始账号"; else -> "" }
+                ProfileHeader(m.nickname, isAdmin = m.isAdmin, via = via)
                 m.restrictions.forEach { RestrictionCard(it) }
                 vm.error?.let { Box(Modifier.padding(horizontal = Spacing.lg)) { ErrorText(it) } }
             }
             vm.error != null -> ErrorState(vm.error ?: "", onRetry = vm::refresh, fill = false)
             else -> LoadingState(fill = false)
         }
-        HorizontalDivider()
         SectionHeader("账号")
         NavRow("设置", "昵称、榜单匿名", onSettings)
         NavRow("我的邀请码", me?.let { "剩余名额 ${it.invitesRemaining}" }, onInvites)
@@ -108,13 +115,16 @@ fun MeScreen(
         ListItem(
             headlineContent = { Text("检查更新") },
             supportingContent = { Text(vm.updateMsg ?: "当前版本 ${BuildConfig.VERSION_NAME}") },
+            trailingContent = if (vm.checking) ({ CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }) else null,
             modifier = Modifier.clickable(enabled = !vm.checking) { vm.checkUpdate() },
         )
-        HorizontalDivider()
+        HorizontalDivider(Modifier.padding(top = Spacing.sm))
         ListItem(
+            leadingContent = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             headlineContent = { Text("退出登录", color = MaterialTheme.colorScheme.error) },
             modifier = Modifier.clickable { confirmLogout = true },
         )
+        Spacer(Modifier.height(Spacing.xl))
     }
     vm.update?.let { UpdateDialog(it, onSkip = vm::skipUpdate, onDismiss = vm::dismissUpdate) }
     if (confirmLogout) {
@@ -135,6 +145,35 @@ internal fun restrictionText(r: Restriction): String {
     val until = r.endsAt?.let { Ddl.display(it) }?.takeIf { it.isNotBlank() }
     val head = if (until != null) "你被${what}到 $until" else "你被$what"
     return if (r.reason.isBlank()) head else "$head，原因：${r.reason}"
+}
+
+/** 「我的」页头：昵称首字的圆形头像 + 昵称 + 身份标签。 */
+@Composable
+private fun ProfileHeader(nickname: String, isAdmin: Boolean, via: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+    ) {
+        Box(
+            Modifier.size(56.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                nickname.take(1),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(nickname, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                if (isAdmin) Tag("管理员", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
+                if (via.isNotEmpty()) MetaTag(via)
+            }
+        }
+    }
 }
 
 @Composable
@@ -197,18 +236,27 @@ fun InvitesScreen(onBack: () -> Unit, vm: InvitesViewModel = hiltViewModel()) {
             item {
                 Text("每人最多邀请 5 位同学，未使用的邀请码也占名额。被邀请的同学如果发布虚假内容被删，你会收到提醒。", style = MaterialTheme.typography.bodyMedium)
             }
-            item { Text("剩余名额：${inv.remaining}", style = MaterialTheme.typography.titleMedium) }
+            item {
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Spacing.sm), modifier = Modifier.padding(top = Spacing.sm)) {
+                    Text("${inv.remaining}", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("个剩余名额", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = Spacing.sm))
+                }
+            }
             item {
                 LoadingButton("生成邀请码", vm.loading, enabled = inv.remaining > 0) { vm.create() }
             }
             item { ErrorText(vm.error) }
             if (inv.codes.isEmpty()) {
-                item { EmptyState("还没有生成邀请码", icon = Icons.Filled.PersonAdd, fill = false) }
+                item { EmptyState("生成一个邀请码发给同学，TA 不在校园网也能注册。", icon = Icons.Filled.PersonAdd, fill = false, title = "还没有生成邀请码") }
             }
             items(inv.codes, key = { it.code }) { c ->
                 ListItem(
                     headlineContent = { Text(c.code, fontFamily = FontFamily.Monospace) },
-                    supportingContent = { Text(c.usedByNickname?.let { "已被「$it」使用" } ?: "未使用") },
+                    supportingContent = {
+                        val used = c.usedByNickname
+                        if (used != null) MetaTag("已被「$used」使用")
+                        else Tag("未使用", MaterialTheme.semantic.successContainer, MaterialTheme.semantic.onSuccessContainer)
+                    },
                     trailingContent = {
                         if (c.usedByNickname == null) {
                             IconButton(onClick = { clip.setText(AnnotatedString(c.code)) }) { Icon(Icons.Filled.ContentCopy, contentDescription = "复制邀请码") }

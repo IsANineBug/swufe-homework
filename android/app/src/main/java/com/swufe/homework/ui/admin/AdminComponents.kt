@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -24,14 +26,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.swufe.homework.data.api.AdminClass
+import com.swufe.homework.data.api.AdminUser
+import com.swufe.homework.ui.homework.MetaTags
 import com.swufe.homework.ui.common.BackTopBar
 import com.swufe.homework.ui.common.ConfirmDialog
 import com.swufe.homework.ui.common.EmptyState
 import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 
 /**
  * 管理路由的门（路由层拦截）：进入时重新拉 /me，只有 role=admin 才组合 [content]；
@@ -180,4 +189,41 @@ fun QuoteBlock(content: @Composable () -> Unit) {
 @Composable
 fun FullBox(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(modifier.fillMaxSize()) { content() }
+}
+
+/** 班级的说明标签（学期、人数、作业数、创建者、已隐藏），代替用「·」拼成的一行。 */
+internal fun classFacts(c: AdminClass): List<String> = listOfNotNull(
+    c.semesterName.ifBlank { null },
+    "${c.memberCount} 人",
+    "${c.assignmentCount} 份作业",
+    "创建者 ${c.createdByNickname}".takeIf { c.createdByNickname.isNotBlank() },
+    "已隐藏".takeIf { c.hidden },
+)
+
+/** 班名（带教师）。 */
+internal fun classTitle(c: AdminClass): String = c.name + (c.teacher?.let { "（$it）" } ?: "")
+
+/** 用户摘要标签：只用 AdminUser 的字段。 */
+internal fun userFacts(u: AdminUser): List<String> = listOfNotNull(
+    "管理员".takeIf { u.isAdmin },
+    "已封号".takeIf { u.disabled },
+    "贡献值 ${u.contributionTotal}",
+    "近 30 天被删 ${u.deletedContent30d} 条",
+    "未处理举报 ${u.reportsAgainstOpen}",
+)
+
+/** 弹窗里的单选班级：单选钮 + 班名 + 说明标签，整行可点。 */
+@Composable
+fun ClassOption(c: AdminClass, selected: Boolean, onSelect: () -> Unit) {
+    Row(
+        // 整行一个 selectable（单选语义），RadioButton 不再单独可点，TalkBack 只有一个焦点
+        Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onSelect).padding(vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(classTitle(c), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            MetaTags(classFacts(c))
+        }
+    }
 }
