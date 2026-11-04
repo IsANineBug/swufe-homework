@@ -19,7 +19,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
@@ -96,7 +98,7 @@ private fun GuestEntry(onClick: () -> Unit) {
         shape = Corners.Card,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().semantics { role = Role.Button },
     ) {
         Row(
             Modifier.padding(Spacing.lg),
@@ -129,6 +131,11 @@ fun RegisterScreen(onBack: () -> Unit, onRegistered: (String) -> Unit, vm: Regis
                 OutlinedTextField(vm.inviteCode, { vm.inviteCode = it.trim() }, label = { Text("邀请码") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (vm.campus == false) TextButton(onClick = vm::checkCampus) { Text("已连上校园网？重新检测") }
             }
+            Text(
+                "你发布的作业（不含图片和附件）可能会以「同学A」这样的匿名代号，随机展示给未注册的访客作样例。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             ErrorText(vm.error)
             LoadingButton("注册", vm.loading, enabled = vm.campus != null) { vm.submit(onRegistered) }
         }

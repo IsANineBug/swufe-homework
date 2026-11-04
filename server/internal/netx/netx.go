@@ -31,6 +31,20 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) netip.Addr {
 	return remote
 }
 
+// RateKey 限流用的 IP key：IPv4 按单个地址；IPv6 按 /64（一个家庭 / 一台主机通常就分到一整个 /64，
+// 按单个地址计数等于不限流）。无效地址原样返回空串。
+func RateKey(a netip.Addr) string {
+	if !a.IsValid() {
+		return ""
+	}
+	a = a.Unmap()
+	if a.Is4() {
+		return a.String()
+	}
+	p, _ := a.Prefix(64)
+	return p.String()
+}
+
 func Contains(prefixes []netip.Prefix, a netip.Addr) bool {
 	if !a.IsValid() {
 		return false
@@ -51,7 +65,17 @@ type Limiter struct {
 	hits   map[string][]time.Time
 	flight map[string]int // Reserve 预占、尚未结算的名额
 	now    func() time.Time
+	// lastSweep 上次清理过期 key 的时间。清理是 O(n)，最多每 sweepEvery 做一次，
+	// 避免 key 很多时（如公开的游客接口）每次 Allow 都在锁内扫全表。
+	lastSweep time.Time
 }
+
+const (
+	// sweepAbove key 数超过这个值才考虑清理
+	sweepAbove = 10000
+	// sweepEvery 两次清理的最小间隔
+	sweepEvery = time.Minute
+)
 
 func NewLimiter(limit int, window time.Duration) *Limiter {
 	return &Limiter{limit: limit, window: window, hits: map[string][]time.Time{}, flight: map[string]int{}, now: time.Now}
@@ -125,7 +149,8 @@ func (l *Limiter) allowLocked(key string) bool {
 		return false
 	}
 	l.hits[key] = append(h, now)
-	if len(l.hits) > 10000 { // 防止内存无限增长
+	if len(l.hits) > sweepAbove && now.Sub(l.lastSweep) >= sweepEvery { // 防止内存无限增长
+		l.lastSweep = now
 		for k, v := range l.hits {
 			if len(v) == 0 || v[len(v)-1].Before(cut) {
 				delete(l.hits, k)

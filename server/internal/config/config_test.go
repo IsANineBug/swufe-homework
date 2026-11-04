@@ -56,3 +56,19 @@ func TestWorkerToken(t *testing.T) {
 		t.Fatalf("%v %v", c, err)
 	}
 }
+
+func TestGuestPreviewSwitch(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	for v, off := range map[string]bool{"": false, "on": false, "true": false, "1": false,
+		"off": true, "OFF": true, "false": true, "False": true, "0": true, " no ": true} {
+		t.Setenv("GUEST_PREVIEW", v)
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.GuestPreviewOff != off {
+			t.Errorf("GUEST_PREVIEW=%q: off=%v, want %v", v, c.GuestPreviewOff, off)
+		}
+	}
+}

@@ -151,7 +151,15 @@ fun HomeScreen(onOpen: (Int) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             when {
                 // 首屏：与卡片同构的骨架，避免空白闪一下
                 !vm.loaded -> LoadingState(skeleton = true)
-                err != null && vm.items.isEmpty() -> ErrorState(err, title = "作业没有加载出来", onRetry = vm::refresh)
+                // 放在可滚动容器里，下拉刷新在出错页也能用（不只靠「重试」按钮）
+                err != null && vm.items.isEmpty() -> LazyColumn(Modifier.fillMaxSize()) {
+                    item(key = "error") {
+                        ErrorState(
+                            err, title = "作业没有加载出来", onRetry = vm::refresh, fill = false,
+                            modifier = Modifier.fillParentMaxSize(),
+                        )
+                    }
+                }
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.sm),

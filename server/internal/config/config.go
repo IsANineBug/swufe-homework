@@ -32,7 +32,7 @@ type Config struct {
 	UploadDir     string
 	FileURLSecret []byte
 	FileURLTTL    time.Duration
-	// GuestPreviewOff GUEST_PREVIEW=off 时关闭游客浏览（/guest/assignments 返回 404）；默认开启
+	// GuestPreviewOff GUEST_PREVIEW 为 off / false / 0 / no（不区分大小写）时关闭游客浏览（/guest/assignments 返回 404）；默认开启
 	GuestPreviewOff bool
 }
 
@@ -56,7 +56,7 @@ func Load() (*Config, error) {
 		FileURLSecret:       []byte(os.Getenv("FILE_URL_SECRET")),
 		FileURLTTL:          time.Hour,
 		WorkerToken:         os.Getenv("WORKER_TOKEN"),
-		GuestPreviewOff:     strings.EqualFold(os.Getenv("GUEST_PREVIEW"), "off"),
+		GuestPreviewOff:     isOff(os.Getenv("GUEST_PREVIEW")),
 	}
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL 未设置")
@@ -122,6 +122,15 @@ func ParseCIDRs(s string) ([]netip.Prefix, error) {
 		out = append(out, p.Masked())
 	}
 	return out, nil
+}
+
+// isOff 开关类变量的「关」：off / false / 0 / no，不区分大小写、忽略首尾空白。其余（含空）都算开。
+func isOff(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "off", "false", "0", "no":
+		return true
+	}
+	return false
 }
 
 func getenv(k, def string) string {

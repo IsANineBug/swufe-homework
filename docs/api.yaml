@@ -187,12 +187,14 @@ paths:
       summary: 游客浏览：随机抽一批作业做展示（不登录、只读、匿名）
       description: |
         每次随机抽取最多 12 条作业，优先未过期的，不足用已过期的补齐，结果按 DDL 升序。
-        只包含未删除、未合并、班级未隐藏、首发者未封号的作业；每条最多 3 个来源（同样排除已删除和已封号作者的来源），
-        正文超过 600 字截断并加「…」。
-        作者一律换成本次结果内的代号（同学A、同学B…，同一作者在同一次结果里代号相同，不跨请求保持）；
-        不返回用户 id、昵称、附件链接（只给 attachment_count）、完成状态、谢谢/投票、举报与管理数据。
+        只包含当前未归档学期里未删除、未合并、班级未隐藏、首发者未封号的作业；每条最多 3 个来源（排除已删除、已封号作者、
+        带附件的来源；一条都不能展示的作业不出现），正文超过 600 字截断并加「…」。
+        作者一律换成代号（同学A、同学B…），代号按每条作业单独编号：同一作业内同一作者代号相同，不同作业之间不对应。
+        不返回用户 id、昵称、附件（attachment_count 恒为 0，保留兼容）、完成状态、谢谢/投票、举报与管理数据。
         没有按 id 取单条的游客接口，详情直接用列表里的 sources 展示。
-        同一 IP 每小时最多 120 次，超出 429 rate_limited。服务器设 GUEST_PREVIEW=off 时 404 not_found。
+        服务器在内存里缓存一个随机池（约 48 条，60 秒重抽），每次请求从池里再随机取。
+        同一 IP 每小时最多 120 次（IPv6 按 /64 计），校园网（CAMPUS_CIDRS）出口每小时 3000 次，超出 429 rate_limited。
+        服务器设 GUEST_PREVIEW 为 off / false / 0 / no 时 404 not_found。
         响应带 Cache-Control: no-store。
       responses:
         "200":
@@ -1465,7 +1467,7 @@ components:
         ddl: {type: string, format: date-time}
         ddl_uncertain: {type: boolean}
         ddl_conflict: {type: boolean}
-        source_count: {type: integer, description: 未删除来源总数（sources 最多只给 3 条）}
+        source_count: {type: integer, description: 未删除且作者未封号的来源总数（注册后能看到的条数；sources 最多只给 3 条）}
         first_poster: {type: string, description: 首发者代号，如「同学A」}
         sources:
           type: array
@@ -1478,7 +1480,7 @@ components:
               body: {type: string, description: 最多 600 字，超出截断}
               stated_ddl: {type: [string, "null"], format: date-time}
               created_at: {type: string, format: date-time}
-              attachment_count: {type: integer, description: 附件数量；游客看不到附件本身}
+              attachment_count: {type: integer, description: 恒为 0（带附件的来源不给游客展示），保留兼容旧客户端}
 
     Assignment:
       allOf:
