@@ -20,6 +20,16 @@
 在 `Routes` 里加 `@Serializable` 目的地（如 `AssignmentDetail(id)`、`Publish(classId)`、`MyPoints`、`PointsRules`），
 在 `AppNavHost` 里注册。通知点击进入作业详情：在 `MainActivity` 读 intent extra 后 `nav.navigate(Routes.AssignmentDetail(id))`。
 
+## 游客浏览（不登录，只读）
+| 路由 | 页面 |
+|---|---|
+| `GuestHome` | 登录页「先随便看看」进入：`GET /guest/assignments` 随机抽的匿名作业（`ui/guest/GuestScreens.kt`），顶部说明 +「注册账号」「我有账号，去登录」，右上角「换一批」 |
+| `GuestDetail(id)` | 样例详情：数据取自 `GuestRepository.last`（服务器没有游客按 id 取详情的接口），底部注册引导；进程被回收后提示回列表 |
+
+- 只读：没有勾选完成、发布、补充、谢谢、投票、举报、交流、贡献值、课表入口；也不进 `Main`。
+- 不存 token：`guest/assignments` 在 `PUBLIC_PATHS` 里，不带 Bearer，401 不触发 refresh、不发 `SessionEvents.expired`。
+- 出口只有 `Register`（注册完照常走恢复码页 → `Main`）和返回 `Login`。
+
 ## 可复用的基础设施
 - 网络：注入 `Retrofit`（已带证书固定 + Bearer + 401 自动续期），`retrofit.create(YourApi::class.java)`。
 - 错误：`apiCall { ... }` 返回 `Result<T>`，失败是 `ApiException(code, message)`，`message` 可直接展示。

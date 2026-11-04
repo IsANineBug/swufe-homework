@@ -76,7 +76,14 @@ import com.swufe.homework.data.api.Attachment
 import com.swufe.homework.data.api.Source
 import com.swufe.homework.ui.common.BackTopBar
 import com.swufe.homework.ui.common.ConfirmDialog
-import com.swufe.homework.ui.common.ErrorText
+import com.swufe.homework.ui.common.BannerTone
+import com.swufe.homework.ui.common.EmptyState
+import com.swufe.homework.ui.common.ErrorState
+import com.swufe.homework.ui.common.LoadingState
+import com.swufe.homework.ui.common.StatusBanner
+import com.swufe.homework.ui.theme.Corners
+import com.swufe.homework.ui.theme.Spacing
+import androidx.compose.material.icons.outlined.Inventory2
 import com.swufe.homework.util.Ddl
 import com.swufe.homework.ui.theme.semantic
 import com.swufe.homework.ui.chat.ReportDialog
@@ -127,23 +134,35 @@ fun DetailScreen(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
             vm.a?.let { a ->
-                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { merging = true; vm.loadMergeTargets() }, modifier = Modifier.weight(1f)) { Text("提议合并") }
-                    FilledTonalButton(onClick = { onSupplement(a.classId, a.id) }, modifier = Modifier.weight(1f)) { Text("补充") }
-                    Button(onClick = vm::toggleDone, modifier = Modifier.weight(1f)) { Text(if (a.done) "取消完成" else "标记完成") }
+                Row(Modifier.fillMaxWidth().padding(Spacing.md), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    OutlinedButton(onClick = { merging = true; vm.loadMergeTargets() }, shape = Corners.Button, modifier = Modifier.weight(1f)) { Text("提议合并") }
+                    FilledTonalButton(onClick = { onSupplement(a.classId, a.id) }, shape = Corners.Button, modifier = Modifier.weight(1f)) { Text("补充") }
+                    Button(onClick = vm::toggleDone, shape = Corners.Button, modifier = Modifier.weight(1f)) { Text(if (a.done) "取消完成" else "标记完成") }
                 }
             }
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            if (vm.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            ErrorText(vm.error)
+            val err = vm.error
             if (vm.gone) {
-                Text("这条作业已被删除或合并到其他作业。", modifier = Modifier.padding(16.dp))
+                EmptyState(
+                    "它已被删除，或合并到了另一条作业。",
+                    title = "这条作业已经不在了",
+                    icon = Icons.Outlined.Inventory2,
+                    actionLabel = "返回",
+                    onAction = onBack,
+                )
                 return@Column
             }
-            val a = vm.a ?: return@Column
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val a = vm.a
+            if (a == null) {
+                // 首次加载：整页加载；失败：原因 + 重试
+                if (err != null) ErrorState(err, title = "作业没有加载出来", onRetry = vm::load) else LoadingState()
+                return@Column
+            }
+            if (vm.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (err != null) StatusBanner(err, BannerTone.Error)
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
                 item { Header(a, onOpenClass) }
                 if (a.pendingMerges.any { it.status == "pending" }) {
                     items(a.pendingMerges.filter { it.status == "pending" }, key = { "m${it.id}" }) { p ->
@@ -233,7 +252,7 @@ fun DetailScreen(
 
 @Composable
 private fun Header(a: Assignment, onOpenClass: (Int) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         Text(
             a.className, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable { onOpenClass(a.classId) },
@@ -246,14 +265,12 @@ private fun Header(a: Assignment, onOpenClass: (Int) -> Unit) {
         if (a.ddlUncertain) {
             Text("DDL 待确认：发布者或识别结果拿不准，请以老师通知为准。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.semantic.warning)
         }
-        Text(
+        MetaTags(
             listOfNotNull(
-                "首发：${a.firstPosterNickname}".takeIf { a.firstPosterNickname.isNotEmpty() },
+                "首发 ${a.firstPosterNickname}".takeIf { a.firstPosterNickname.isNotEmpty() },
                 "已合并 ${a.mergedFrom.size} 条重复作业".takeIf { a.mergedFrom.isNotEmpty() },
                 "已完成（仅自己可见）".takeIf { a.done },
-            ).joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline,
+            ),
         )
     }
 }
@@ -272,15 +289,14 @@ private fun SourceCard(
     onReportUser: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(Modifier.fillMaxWidth(), shape = Corners.Card) {
+        Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Tag(if (s.isFirst) "首发" else "补充", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
-                Text(
-                    " ${s.authorNickname}" + (s.createdAt?.let { " · ${Ddl.display(it)}" } ?: ""),
-                    style = MaterialTheme.typography.bodySmall,
+                SourceByline(
+                    s.authorNickname, s.createdAt,
                     // 点昵称打开同一个菜单（别人的内容里有「举报」「举报这个人」）
-                    modifier = Modifier.weight(1f).clickable(enabled = !mine, onClickLabel = "更多") { menu = true },
+                    modifier = Modifier.weight(1f).padding(start = Spacing.sm).clickable(enabled = !mine, onClickLabel = "更多") { menu = true },
                 )
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "更多") }

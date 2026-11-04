@@ -14,6 +14,11 @@ object Routes {
     /** 注册或找回后强制展示恢复码。fromRecover=true 时确认后回登录页。 */
     @Serializable data class RecoveryCode(val code: String, val fromRecover: Boolean = false)
 
+    // ---- 游客浏览（不登录，只读）：登录页「先随便看看」进入 ----
+    @Serializable data object GuestHome
+    /** 游客看的作业详情，数据来自 GuestRepository 里最近一次抽到的样例。 */
+    @Serializable data class GuestDetail(val id: Int)
+
     // ---- 主界面（底部导航）----
     @Serializable data object Main
 

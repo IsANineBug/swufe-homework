@@ -66,6 +66,7 @@ docker build -t swufe-homework-server ./server
 | `SEMESTER_NAME` / `SEMESTER_STARTS_ON` / `SEMESTER_ENDS_ON` | 否 | 三个同时给：启动时确保该学期存在并设为当前学期（日期 `YYYY-MM-DD`） |
 | `UPLOAD_DIR` | 否 | 上传目录，默认 `/data/uploads`（与 nginx `/_protected/` 共享卷）。子目录建 0755、文件 0644 |
 | `FILE_URL_SECRET` | 否 | `/files` 签名密钥，≥16 字符；留空则由 `JWT_SECRET` 派生（两者不同） |
+| `GUEST_PREVIEW` | 否 | 游客浏览开关，默认开启；`off` / `false` / `0` / `no`（不区分大小写）关闭，`/api/v1/guest/assignments` 返回 404 |
 
 学期：设置了 `SEMESTER_*` 以其为准；不设置则按校历自动生成和切换（秋季 9/1–次年 2/1，春季 3/1–8/1，2 月和 8 月归入下一学期），切换时旧学期归档为只读。管理员学期管理接口放下一版。
 
@@ -92,6 +93,7 @@ TEST_DATABASE_URL='postgres://postgres:dev@127.0.0.1:5432/hwtest?sslmode=disable
 | `POST /api/v1/auth/recover` | 恢复码重设密码，返回新恢复码，所有设备下线 |
 | `POST /api/v1/auth/logout` | `{refresh_token}` 只注销本机；`{all:true}` 注销全部设备 |
 | `GET /api/v1/meta` | 当前学期、12 节作息、服务器时间 |
+| `GET /api/v1/guest/assignments` | 游客浏览（不登录）：从当前学期随机 12 条作业，作者按每条作业匿名为「同学A」等，不含用户 id、附件、完成状态，带附件的来源不展示；内存缓存池 60 秒重抽一次；每 IP（IPv6 按 /64）每小时 120 次，校园网出口 3000 次；`GUEST_PREVIEW=off` 关闭 |
 | `GET/PATCH /api/v1/me` | 我的信息；改昵称、榜单匿名 |
 | `GET/POST /api/v1/me/invites` | 邀请码列表 / 生成（每人 5 个名额，未使用的也占） |
 | `GET /api/v1/me/notices` | 最近 100 条通知 |

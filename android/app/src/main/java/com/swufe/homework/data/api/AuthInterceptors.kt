@@ -14,8 +14,8 @@ import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
 
-/** 无需登录的接口（与 api.yaml 中 security: [] 一致）。 */
-internal val PUBLIC_PATHS = listOf("auth/campus-check", "auth/register", "auth/login", "auth/refresh", "auth/recover", "meta")
+/** 无需登录的接口（与 api.yaml 中 security: [] 一致）。游客浏览 guest/assignments 也在这里：不带 token、不续期。 */
+internal val PUBLIC_PATHS = listOf("auth/campus-check", "auth/register", "auth/login", "auth/refresh", "auth/recover", "meta", "guest/assignments")
 
 private fun Request.isPublic(): Boolean {
     val p = url.encodedPath

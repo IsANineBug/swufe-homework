@@ -136,7 +136,7 @@ class AiJobsViewModel @Inject constructor(val tracker: AiJobTracker) : ViewModel
     }
 }
 
-/** 状态条：「课表识别中…」/「课表识别好了 · 去确认 ›」/ 失败原因 +「手动添加」。整条可点，进对应确认页。 */
+/** 状态条：「课表识别中…」/「课表识别好了」+「去确认」/ 失败原因 +「手动添加」。整条可点，进对应确认页。 */
 @Composable
 private fun AiJobBanner(s: AiJobState, ai: AiJobsViewModel, onOpen: (AiJobState, Boolean) -> Unit) {
     val what = aiJobLabel(s.kind)
@@ -144,7 +144,7 @@ private fun AiJobBanner(s: AiJobState, ai: AiJobsViewModel, onOpen: (AiJobState,
         AiJobStatus.Running -> StatusBanner("${what}识别中…", BannerTone.Progress, onClick = { onOpen(s, false) })
         AiJobStatus.Done -> StatusBanner(
             "${what}识别好了", BannerTone.Success,
-            actionLabel = "去确认 ›", onAction = { onOpen(s, false) }, onClick = { onOpen(s, false) },
+            actionLabel = "去确认", onAction = { onOpen(s, false) }, onClick = { onOpen(s, false) },
             onDismiss = { ai.dismiss(s) },
         )
         AiJobStatus.Failed, AiJobStatus.Timeout -> StatusBanner(

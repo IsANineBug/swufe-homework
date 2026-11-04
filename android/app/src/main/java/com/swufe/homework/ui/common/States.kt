@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -53,8 +54,8 @@ import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.ui.theme.semantic
 
 /**
- * 空状态：图标 + 一句话 + 可选按钮。列表为空、筛选后没有结果时用，代替一行灰字。
- * 放在可滚动列表里时用 `item { EmptyState(...) }`，[fill] 传 false。
+ * 空状态：图标 + 可选标题 + 一句话 + 可选按钮。列表为空、筛选后没有结果时用，代替一行灰字。
+ * 文案写「接下来能做什么」，不写情绪。放在可滚动列表里时用 `item { EmptyState(...) }`，[fill] 传 false。
  */
 @Composable
 fun EmptyState(
@@ -64,15 +65,11 @@ fun EmptyState(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     fill: Boolean = true,
+    title: String? = null,
 ) {
     CenteredBlock(modifier, fill) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outline)
-        Text(
-            message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
+        StateIcon(icon, MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.onSurfaceVariant)
+        StateText(title, message)
         if (actionLabel != null && onAction != null) {
             OutlinedButton(onClick = onAction, shape = Corners.Button) { Text(actionLabel) }
         }
@@ -111,16 +108,41 @@ fun ErrorState(
     retryLabel: String = "重试",
     onRetry: (() -> Unit)? = null,
     fill: Boolean = true,
+    title: String? = null,
 ) {
     CenteredBlock(modifier.semantics { liveRegion = LiveRegionMode.Polite }, fill) {
-        Icon(Icons.Filled.ErrorOutline, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
+        StateIcon(Icons.Filled.ErrorOutline, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+        StateText(title, message)
+        if (onRetry != null) Button(onClick = onRetry, shape = Corners.Button) { Text(retryLabel) }
+    }
+}
+
+/** 空/出错状态的图标：放在 72dp 的色块圆里，比一枚裸图标更像一个「状态」。 */
+@Composable
+private fun StateIcon(icon: ImageVector, container: Color, content: Color) {
+    Box(Modifier.size(72.dp).background(container, CircleShape), contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(36.dp), tint = content)
+    }
+}
+
+@Composable
+private fun StateText(title: String?, message: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        if (title != null) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
         Text(
             message,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        if (onRetry != null) Button(onClick = onRetry, shape = Corners.Button) { Text(retryLabel) }
     }
 }
 
@@ -147,14 +169,18 @@ private fun SkeletonList(rows: Int, modifier: Modifier) {
         modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm).semantics { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
+        // 与作业卡片同构：左侧日期票根 + 右侧三行
         repeat(rows) {
-            Column(
-                Modifier.fillMaxWidth().alpha(a).background(MaterialTheme.colorScheme.surfaceContainerLow, Corners.Card).padding(Spacing.lg),
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            Row(
+                Modifier.fillMaxWidth().alpha(a).background(MaterialTheme.colorScheme.surfaceContainerLow, Corners.Card).padding(Spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                Box(Modifier.fillMaxWidth(0.35f).height(12.dp).background(block, RoundedCornerShape(4.dp)))
-                Box(Modifier.fillMaxWidth(0.8f).height(16.dp).background(block, RoundedCornerShape(4.dp)))
-                Box(Modifier.fillMaxWidth(0.55f).height(12.dp).background(block, RoundedCornerShape(4.dp)))
+                Box(Modifier.size(width = 64.dp, height = 72.dp).background(block, Corners.Tag))
+                Column(Modifier.weight(1f).padding(vertical = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Box(Modifier.fillMaxWidth(0.35f).height(12.dp).background(block, RoundedCornerShape(4.dp)))
+                    Box(Modifier.fillMaxWidth(0.8f).height(16.dp).background(block, RoundedCornerShape(4.dp)))
+                    Box(Modifier.fillMaxWidth(0.55f).height(12.dp).background(block, RoundedCornerShape(4.dp)))
+                }
             }
         }
     }
@@ -166,7 +192,7 @@ enum class BannerTone { Progress, Info, Success, Warning, Error }
 /**
  * 页面顶部状态条（后台识图等跨页面的进行中任务）。整条可点（[onClick]），右侧可放一个文字操作和关闭按钮。
  * 例：`StatusBanner("课表识别中…", BannerTone.Progress)`；
- * `StatusBanner("课表识别好了", BannerTone.Success, actionLabel = "去确认 ›", onAction = ...)`；
+ * `StatusBanner("课表识别好了", BannerTone.Success, actionLabel = "去确认", onAction = ...)`；
  * `StatusBanner("识别失败：AI 暂时不可用", BannerTone.Error, actionLabel = "手动添加", onAction = ...)`。
  */
 @Composable

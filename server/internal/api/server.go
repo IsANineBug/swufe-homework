@@ -31,6 +31,12 @@ type Server struct {
 	// WS2：文件 URL 签名、每人上传频率（每小时 60 次）
 	Files         *files.Signer
 	UploadLimiter *netx.Limiter
+	// 游客浏览（GET /guest/assignments）：按 IP（IPv6 按 /64）限流；校园网出口用放宽的 GuestCampusLimiter
+	GuestLimiter       *netx.Limiter
+	GuestCampusLimiter *netx.Limiter
+	// GuestPoolTTL 游客样例缓存池的有效期；<= 0 不缓存
+	GuestPoolTTL time.Duration
+	guestPool    *guestPool
 	// WS3：AI 任务。作业创建 / DDL 变更 / 新增或编辑来源后由 hw_assignments.go 触发
 	AI  *ai.Service
 	Now func() time.Time
@@ -39,15 +45,19 @@ type Server struct {
 func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	signer := files.NewSigner(cfg.FileURLSecret, cfg.JWTSecret, cfg.FileURLTTL)
 	return &Server{
-		Cfg:           cfg,
-		DB:            db,
-		Tokens:        auth.NewIssuer(cfg.JWTSecret, cfg.AccessTTL),
-		RegLimiter:    netx.NewLimiter(cfg.RegisterPerIPHour, time.Hour),
-		FailLimiter:   netx.NewLimiter(LoginFailuresPerHour, time.Hour),
-		Files:         signer,
-		UploadLimiter: netx.NewLimiter(UploadsPerHour, time.Hour),
-		AI:            ai.New(cfg, db, signer), // 与 /files 共用签名器
-		Now:           time.Now,
+		Cfg:                cfg,
+		DB:                 db,
+		Tokens:             auth.NewIssuer(cfg.JWTSecret, cfg.AccessTTL),
+		RegLimiter:         netx.NewLimiter(cfg.RegisterPerIPHour, time.Hour),
+		FailLimiter:        netx.NewLimiter(LoginFailuresPerHour, time.Hour),
+		Files:              signer,
+		UploadLimiter:      netx.NewLimiter(UploadsPerHour, time.Hour),
+		GuestLimiter:       netx.NewLimiter(GuestPerIPHour, time.Hour),
+		GuestCampusLimiter: netx.NewLimiter(GuestCampusPerIPHour, time.Hour),
+		GuestPoolTTL:       DefaultGuestPoolTTL,
+		guestPool:          &guestPool{},
+		AI:                 ai.New(cfg, db, signer), // 与 /files 共用签名器
+		Now:                time.Now,
 	}
 }
 
@@ -73,6 +83,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/auth/refresh", s.refresh)
 		r.Post("/auth/recover", s.recover)
 		r.Get("/meta", s.meta)
+		// 游客浏览：随机样例作业，只读、匿名（guest.go）
+		r.Get("/guest/assignments", s.guestAssignments)
 
 		// worker（WORKER_TOKEN）
 		r.Group(func(r chi.Router) {
