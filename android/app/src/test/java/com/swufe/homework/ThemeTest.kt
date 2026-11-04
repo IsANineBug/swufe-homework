@@ -42,6 +42,8 @@ class ThemeTest {
         assertContrast("$tag onPrimaryContainer", cs.onPrimaryContainer, cs.primaryContainer, 4.5)
         assertContrast("$tag onSecondaryContainer", cs.onSecondaryContainer, cs.secondaryContainer, 4.5)
         assertContrast("$tag onErrorContainer", cs.onErrorContainer, cs.errorContainer, 4.5)
+        // 「管理员」标签（我的、用户详情）
+        assertContrast("$tag onTertiaryContainer", cs.onTertiaryContainer, cs.tertiaryContainer, 4.5)
         assertContrast("$tag error 文字", cs.error, cs.surface, 4.5)
         // outline 是边框/非文字元素，WCAG 非文字 3:1
         assertContrast("$tag outline", cs.outline, cs.surface, 3.0)

@@ -14,16 +14,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.PersonSearch
+import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.swufe.homework.data.api.AdminClass
 import com.swufe.homework.data.api.AdminUser
@@ -48,6 +50,10 @@ import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.common.SectionHeader
 import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
+import com.swufe.homework.ui.theme.semantic
+import com.swufe.homework.ui.homework.MetaTag
+import com.swufe.homework.ui.homework.MetaTags
+import com.swufe.homework.ui.homework.Tag
 import com.swufe.homework.util.Ddl
 import kotlinx.coroutines.launch
 
@@ -69,7 +75,7 @@ internal fun UsersTab(snack: SnackbarHostState, onOpenUser: (Int) -> Unit) {
                 items(items, key = { it.id }) { u ->
                     ListItem(
                         headlineContent = { Text(u.nickname) },
-                        supportingContent = { Text(userSummary(u)) },
+                        supportingContent = { MetaTags(userFacts(u), Modifier.padding(top = Spacing.xs)) },
                         trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
                         modifier = Modifier.clickable { onOpenUser(u.id) },
                     )
@@ -151,19 +157,31 @@ private fun UserDetail(
 ) {
     LazyColumn(contentPadding = PaddingValues(bottom = Spacing.xl)) {
         item {
-            ListItem(
-                headlineContent = { Text(u.nickname, style = MaterialTheme.typography.titleLarge) },
-                supportingContent = { Text(userSummary(u)) },
-            )
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                Text(u.nickname, style = MaterialTheme.typography.headlineSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    if (u.isAdmin) Tag("管理员", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
+                    if (u.disabled) Tag("已封号", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                    MetaTag(registeredViaLabel(u.registeredVia))
+                }
+            }
         }
         item {
-            Column(Modifier.padding(horizontal = Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                InfoLine("注册方式", registeredViaLabel(u.registeredVia))
-                u.inviterNickname?.let { InfoLine("邀请人", it) }
-                u.createdAt?.let { InfoLine("注册时间", Ddl.display(it)) }
-                InfoLine("本学期已结算贡献值", u.contributionTotal.toString())
-                InfoLine("近 30 天被删除的内容", "${u.deletedContent30d} 条")
-                InfoLine("针对 TA 的未处理举报", "${u.reportsAgainstOpen} 条")
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = Corners.Card,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
+            ) {
+                Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    u.inviterNickname?.let { InfoLine("邀请人", it) }
+                    u.createdAt?.let { InfoLine("注册时间", Ddl.display(it)) }
+                    InfoLine("本学期已结算贡献值", u.contributionTotal.toString())
+                    InfoLine("近 30 天被删除的内容", "${u.deletedContent30d} 条")
+                    InfoLine("针对 TA 的未处理举报", "${u.reportsAgainstOpen} 条")
+                }
             }
         }
         if (!u.isAdmin) {
@@ -177,13 +195,23 @@ private fun UserDetail(
         }
         item { SectionHeader("处罚记录（最近 20 条）") }
         if (u.sanctions.isEmpty()) item {
-            Text("没有处罚记录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Spacing.lg))
+            EmptyState("TA 没有被处罚过", icon = Icons.Outlined.VerifiedUser, fill = false)
         }
         items(u.sanctions, key = { it.id }) { s ->
             val active = sanctionActive(s)
             ListItem(
-                headlineContent = { Text(sanctionLabel(s.kind) + if (active) "（生效中）" else "") },
-                supportingContent = { Text(sanctionLine(s)) },
+                headlineContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Text(sanctionLabel(s.kind))
+                        if (active) Tag("生效中", MaterialTheme.semantic.urgentContainer, MaterialTheme.semantic.onUrgentContainer)
+                    }
+                },
+                supportingContent = {
+                    Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        s.reason.takeIf { it.isNotBlank() }?.let { Text("原因：$it") }
+                        MetaTags(sanctionFacts(s))
+                    }
+                },
                 trailingContent = if (active) { { TextButton(onClick = { onLift(s) }, enabled = !busy) { Text("解除") } } } else null,
             )
         }
@@ -192,9 +220,9 @@ private fun UserDetail(
 
 @Composable
 private fun InfoLine(label: String, value: String) {
-    Row {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodyMedium)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -205,12 +233,12 @@ internal fun registeredViaLabel(v: String): String = when (v) {
     else -> v
 }
 
-internal fun sanctionLine(s: Sanction): String = listOfNotNull(
-    s.reason.takeIf { it.isNotBlank() }?.let { "原因：$it" },
+/** 处罚的时间标签（开始、到期或永久、解除）；原因单独成行。 */
+internal fun sanctionFacts(s: Sanction): List<String> = listOfNotNull(
     s.startsAt?.let { "开始 ${Ddl.display(it)}" },
     if (s.endsAt == null) "永久" else "到 ${Ddl.display(s.endsAt)}",
     s.liftedAt?.let { "已于 ${Ddl.display(it)} 解除" },
-).joinToString(" · ")
+)
 
 /** 调贡献值：选班（按班名搜，管理员看不到 TA 加入了哪些班）、加/扣、分值、必填原因。 */
 @Composable
@@ -237,12 +265,7 @@ private fun PointsDialog(u: AdminUser, vm: AdminUserViewModel, onDismiss: () -> 
         extra = {
             SearchRow(q, { q = it }, "搜索班级", onSearch = search, padded = false)
             err?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            results.take(5).forEach { c ->
-                Row(Modifier.fillMaxWidth().clickable { cls = c }, verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = cls?.id == c.id, onClick = { cls = c })
-                    Text(classLine(c), style = MaterialTheme.typography.bodySmall)
-                }
-            }
+            results.take(5).forEach { c -> ClassOption(c, selected = cls?.id == c.id) { cls = c } }
             ChoiceChips(listOf(true, false), add, { if (it) "加" else "扣" }) { add = it }
             OutlinedTextField(
                 amount, { v -> amount = v.filter { it.isDigit() }.take(3) },

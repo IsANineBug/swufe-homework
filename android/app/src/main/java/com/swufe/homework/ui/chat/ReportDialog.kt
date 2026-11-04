@@ -4,8 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.AlertDialog
@@ -17,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,6 +39,7 @@ import com.swufe.homework.data.api.userMessage
 import com.swufe.homework.data.repo.ChatRepository
 import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
+import com.swufe.homework.ui.theme.semantic
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -112,7 +116,7 @@ fun ReportDialog(target: ReportTarget, onDismiss: () -> Unit) {
     if (done != null) {
         AlertDialog(
             onDismissRequest = close,
-            icon = { Icon(Icons.Outlined.Flag, contentDescription = null) },
+            icon = { Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.semantic.success) },
             title = { Text("举报${target.kind.label}") },
             text = { Text(done.message) },
             confirmButton = { TextButton(onClick = close) { Text("知道了") } },
@@ -127,12 +131,14 @@ fun ReportDialog(target: ReportTarget, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 target.preview?.takeIf { it.isNotBlank() }?.let {
-                    Text(
-                        "「$it」", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = Corners.Tag, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(Spacing.md),
+                        )
+                    }
                 }
-                Text("举报会交给管理员处理，被举报的人看不到是谁举报的。", style = MaterialTheme.typography.bodySmall)
+                Text("举报会交给管理员处理，被举报的人看不到是谁举报的。", style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(
                     value = reason,
                     onValueChange = { reason = it },

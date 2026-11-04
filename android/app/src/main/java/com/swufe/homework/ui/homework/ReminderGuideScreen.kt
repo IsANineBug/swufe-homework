@@ -101,7 +101,7 @@ fun ReminderGuideScreen(onBack: () -> Unit, vm: ReminderGuideViewModel = hiltVie
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = Spacing.lg),
             )
-            SectionHeader("需要开启")
+            SectionHeader("需要开启（已开 ${listOf(notifOk, exactOk, batteryOk).count { it }}/3）")
             Step("通知权限", "用通知栏消息提醒你，带「标记完成」按钮", notifOk) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifOk) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 else openNotificationSettings(ctx)
@@ -110,7 +110,7 @@ fun ReminderGuideScreen(onBack: () -> Unit, vm: ReminderGuideViewModel = hiltVie
             Step("电池优化白名单", "允许后台运行，省电模式下也能提醒", batteryOk) { openBattery(ctx) }
             HorizontalDivider(Modifier.padding(vertical = Spacing.sm))
             Text(
-                "部分手机重启后，要打开一次 App 提醒才会重新排好。以后可以在「我的 → 提醒设置」再来这里。",
+                "部分手机重启后，要打开一次 App 提醒才会重新排好。以后可以在「我的」里的「提醒设置」再来这里。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = Spacing.lg),
@@ -129,7 +129,10 @@ private fun Step(title: String, sub: String, ok: Boolean, onClick: () -> Unit) {
         },
         headlineContent = { Text(title) },
         supportingContent = { Text(sub) },
-        trailingContent = { OutlinedButton(onClick = onClick, enabled = !ok, shape = Corners.Button) { Text(if (ok) "已开启" else "去设置") } },
+        trailingContent = {
+            if (ok) Tag("已开启", MaterialTheme.semantic.successContainer, MaterialTheme.semantic.onSuccessContainer)
+            else OutlinedButton(onClick = onClick, shape = Corners.Button) { Text("去设置") }
+        },
     )
 }
 

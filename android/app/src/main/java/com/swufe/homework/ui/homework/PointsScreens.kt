@@ -7,10 +7,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -23,7 +26,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.outlined.Description
+import com.swufe.homework.ui.theme.Corners
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -79,6 +88,9 @@ class PointsViewModel @Inject constructor(private val repo: AssignmentRepository
     }
 }
 
+/** 每天最多得的贡献值（与「今日已得 x / 30 分」一致）。 */
+private const val DAILY_CAP = 30
+
 fun reasonLabel(r: String) = when (r) {
     "first_post" -> "首发作业"
     "supplement" -> "补充内容"
@@ -111,12 +123,24 @@ fun MyPointsScreen(onBack: () -> Unit, onRules: () -> Unit, vm: PointsViewModel 
         }
         LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(bottom = Spacing.xl)) {
             item {
-                Card(Modifier.fillMaxWidth().padding(Spacing.lg)) {
-                    Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                        Text("本学期贡献值", style = MaterialTheme.typography.labelLarge)
-                        Text("$total", style = MaterialTheme.typography.displaySmall)
-                        Text("今日已得 ${vm.today} / 30 分", style = MaterialTheme.typography.bodyMedium)
-                        Text("贡献值只作荣誉展示，不能兑换、不能转让。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = Corners.Card,
+                    modifier = Modifier.fillMaxWidth().padding(Spacing.lg),
+                ) {
+                    Column(Modifier.padding(Spacing.xl), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Text("本学期贡献值", style = MaterialTheme.typography.titleSmall)
+                        Text("$total", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+                        // 今日进度：每天最多 30 分
+                        LinearProgressIndicator(
+                            progress = { (vm.today / DAILY_CAP.toFloat()).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(Corners.Tag),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surface,
+                        )
+                        Text("今日已得 ${vm.today} / $DAILY_CAP 分", style = MaterialTheme.typography.bodyMedium)
+                        Text("贡献值只作荣誉展示，不能兑换、不能转让。", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -128,17 +152,19 @@ fun MyPointsScreen(onBack: () -> Unit, onRules: () -> Unit, vm: PointsViewModel 
             }
             items(vm.items) { e ->
                 ListItem(
+                    overlineContent = { Text(Ddl.display(e.createdAt)) },
                     headlineContent = { Text(reasonLabel(e.reason)) },
                     supportingContent = {
-                        Text(
-                            listOfNotNull(e.className.ifEmpty { null }, e.assignmentTitle, Ddl.display(e.createdAt), statusLabel(e.status)).joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                            e.assignmentTitle?.takeIf { it.isNotBlank() }?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            MetaTags(listOfNotNull(e.className.ifEmpty { null }, statusLabel(e.status)))
+                        }
                     },
                     trailingContent = {
                         Text(
                             (if (e.delta > 0) "+" else "") + e.delta,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
                             color = when {
                                 e.status == "void" -> MaterialTheme.colorScheme.onSurfaceVariant
                                 e.delta < 0 -> MaterialTheme.colorScheme.error
@@ -150,7 +176,11 @@ fun MyPointsScreen(onBack: () -> Unit, onRules: () -> Unit, vm: PointsViewModel 
                 HorizontalDivider()
             }
             if (vm.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(Spacing.lg)) }
-            else if (vm.cursor != null) item { TextButton(onClick = { vm.load(reset = false) }, modifier = Modifier.padding(Spacing.sm)) { Text("加载更多") } }
+            else if (vm.cursor != null) item {
+                Box(Modifier.fillMaxWidth().padding(Spacing.sm), contentAlignment = Alignment.Center) {
+                    OutlinedButton(onClick = { vm.load(reset = false) }, shape = Corners.Button) { Text("加载更多") }
+                }
+            }
         }
     }
 }
@@ -167,7 +197,7 @@ fun PointsRulesScreen(onBack: () -> Unit) {
     val blocks = remember { loadRules(ctx) }
     Scaffold(topBar = { BackTopBar("贡献值规则", onBack) }) { pad ->
         if (blocks.isEmpty()) {
-            EmptyState("规则暂时无法显示，请更新到最新版本。", Modifier.padding(pad))
+            EmptyState("规则暂时无法显示，请更新到最新版本。", Modifier.padding(pad), icon = Icons.Outlined.Description)
             return@Scaffold
         }
         LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
@@ -175,8 +205,13 @@ fun PointsRulesScreen(onBack: () -> Unit) {
                 when (b) {
                     is RulesBlock.Title -> Text(b.text, style = MaterialTheme.typography.headlineSmall)
                     is RulesBlock.Heading -> Text(b.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = Spacing.sm))
-                    is RulesBlock.Quote -> Text(rich(b.text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    is RulesBlock.Bullet -> Row { Text("• "); Text(rich(b.text), style = MaterialTheme.typography.bodyMedium) }
+                    is RulesBlock.Quote -> Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = Corners.Tag, modifier = Modifier.fillMaxWidth()) {
+                        Text(rich(b.text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Spacing.md))
+                    }
+                    is RulesBlock.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(rich(b.text), style = MaterialTheme.typography.bodyMedium)
+                    }
                     is RulesBlock.Para -> Text(rich(b.text), style = MaterialTheme.typography.bodyMedium)
                     is RulesBlock.Table -> Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(Spacing.sm)) {

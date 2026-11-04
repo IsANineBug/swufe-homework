@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,16 +28,24 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.filled.CalendarMonth
+import com.swufe.homework.ui.common.BannerTone
 import com.swufe.homework.ui.common.EmptyState
+import com.swufe.homework.ui.common.StatusBanner
+import com.swufe.homework.util.Ddl
 import com.swufe.homework.ui.common.ErrorState
 import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.theme.Corners
@@ -47,7 +56,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.swufe.homework.data.api.Period
-import com.swufe.homework.ui.common.ErrorText
 import com.swufe.homework.ui.theme.CourseColors
 import com.swufe.homework.util.WEEKDAY_NAMES
 import com.swufe.homework.ui.theme.OnCourseColor
@@ -85,13 +93,15 @@ fun TimetableScreen(
         ImportBar(aiOnline, onImport, onManual)
         when {
             classes.isNotEmpty() -> {
-                if (error != null) Box(Modifier.padding(horizontal = Spacing.lg)) { ErrorText(error) }
+                // 有旧课表时出错：保留课表，顶部提示 + 重试
+                error?.let { StatusBanner(it, BannerTone.Error, actionLabel = "重试", onAction = vm::refresh) }
                 TimetableGrid(periods, buildBlocks(classes), onOpenClass, unread)
             }
             refreshing -> LoadingState(message = "正在加载课表…")
             error != null -> ErrorState(error ?: "", onRetry = vm::refresh)
             else -> EmptyState(
-                "还没有课程。导入易校园课表截图，或手动添加课程。",
+                "导入易校园课表截图，或手动添加课程。",
+                title = "还没有课程",
                 icon = Icons.Filled.CalendarMonth,
                 actionLabel = "手动添加",
                 onAction = onManual,
@@ -110,6 +120,7 @@ private fun ImportBar(aiOnline: Boolean, onImport: () -> Unit, onManual: () -> U
             Button(onClick = onImport, enabled = aiOnline, shape = Corners.Button, modifier = Modifier.weight(1f)) { Text("导入课表截图") }
             OutlinedButton(onClick = onManual, shape = Corners.Button, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(ICON))
+                Spacer(Modifier.width(Spacing.xs))
                 Text("手动添加")
             }
         }
@@ -121,15 +132,37 @@ private fun ImportBar(aiOnline: Boolean, onImport: () -> Unit, onManual: () -> U
 
 @Composable
 fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (Int) -> Unit, unread: Set<Int> = emptySet()) {
+    // 今天是周几（1–7）：表头标出来，那一列铺浅底，扫一眼就知道今天有什么课
+    val today = remember { Ddl.now().dayOfWeek.value }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = AXIS_W)) {
-            WEEKDAY_NAMES.forEach {
-                Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.fillMaxWidth().padding(start = AXIS_W, top = Spacing.xs, bottom = Spacing.xs)) {
+            WEEKDAY_NAMES.forEachIndexed { i, name ->
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    if (i + 1 == today) {
+                        Surface(color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, shape = Corners.Tag) {
+                            Text(
+                                name,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 2.dp)
+                                    .semantics { contentDescription = "$name（今天）" },
+                            )
+                        }
+                    } else {
+                        Text(name, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
         BoxWithConstraints(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             val colW: Dp = (maxWidth - AXIS_W) / 5
             Box(Modifier.height(ROW_H * 12).fillMaxWidth()) {
+                if (today in 1..WEEKDAY_NAMES.size) {
+                    Box(
+                        Modifier.offset(x = AXIS_W + colW * (today - 1)).width(colW).height(ROW_H * 12)
+                            .background(MaterialTheme.colorScheme.surfaceContainer),
+                    )
+                }
                 // 左侧时间轴 + 横线
                 for (i in 0 until 12) {
                     val p = periods.getOrNull(i)
