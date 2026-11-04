@@ -66,6 +66,7 @@ import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.theme.Spacing
 import com.swufe.homework.util.Ddl
 import kotlinx.coroutines.flow.map
+import androidx.compose.foundation.layout.heightIn
 
 /**
  * 班级页「交流」Tab。
@@ -220,8 +221,14 @@ private fun Bubble(
     ) {
         // 昵称（较重）与时间（较轻）分开排，不用「·」拼接
         Row(
-            modifier = (if (onNicknameClick != null) Modifier.clickable(onClickLabel = "更多", onClick = onNicknameClick) else Modifier)
-                .padding(horizontal = Spacing.xs),
+            // 可点时触控区至少 48dp 高
+            modifier = (
+                if (onNicknameClick != null) {
+                    Modifier.heightIn(min = 48.dp).clickable(onClickLabel = "更多", onClick = onNicknameClick)
+                } else {
+                    Modifier
+                }
+                ).padding(horizontal = Spacing.xs),
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {

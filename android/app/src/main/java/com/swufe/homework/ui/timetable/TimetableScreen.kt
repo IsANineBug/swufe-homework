@@ -59,6 +59,10 @@ import com.swufe.homework.data.api.Period
 import com.swufe.homework.ui.theme.CourseColors
 import com.swufe.homework.util.WEEKDAY_NAMES
 import com.swufe.homework.ui.theme.OnCourseColor
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 
 // 网格尺寸（布局常量，不是间距）：每节一行，左侧时间轴宽度
 private val ROW_H = 60.dp
@@ -133,7 +137,14 @@ private fun ImportBar(aiOnline: Boolean, onImport: () -> Unit, onManual: () -> U
 @Composable
 fun TimetableGrid(periods: List<Period>, blocks: List<GridBlock>, onOpenClass: (Int) -> Unit, unread: Set<Int> = emptySet()) {
     // 今天是周几（1–7）：表头标出来，那一列铺浅底，扫一眼就知道今天有什么课
-    val today = remember { Ddl.now().dayOfWeek.value }
+    // 每分钟核对一次，屏幕开着跨过零点时高亮跟着换到新的一天
+    var today by remember { mutableIntStateOf(Ddl.now().dayOfWeek.value) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            today = Ddl.now().dayOfWeek.value
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = AXIS_W, top = Spacing.xs, bottom = Spacing.xs)) {
             WEEKDAY_NAMES.forEachIndexed { i, name ->

@@ -1,6 +1,5 @@
 package com.swufe.homework.ui.admin
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +39,8 @@ import com.swufe.homework.ui.common.EmptyState
 import com.swufe.homework.ui.common.LoadingState
 import com.swufe.homework.ui.theme.Corners
 import com.swufe.homework.ui.theme.Spacing
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 
 /**
  * 管理路由的门（路由层拦截）：进入时重新拉 /me，只有 role=admin 才组合 [content]；
@@ -215,10 +216,11 @@ internal fun userFacts(u: AdminUser): List<String> = listOfNotNull(
 @Composable
 fun ClassOption(c: AdminClass, selected: Boolean, onSelect: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onSelect).padding(vertical = Spacing.xs),
+        // 整行一个 selectable（单选语义），RadioButton 不再单独可点，TalkBack 只有一个焦点
+        Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onSelect).padding(vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = onSelect)
+        RadioButton(selected = selected, onClick = null)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Text(classTitle(c), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             MetaTags(classFacts(c))

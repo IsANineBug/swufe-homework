@@ -224,7 +224,12 @@ private fun ReportCard(r: AdminReport, busy: Boolean, onAction: (ReportAction) -
             }
             if (r.handledAt != null) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    Tag(resolutionLabel(r.resolution), MaterialTheme.semantic.successContainer, MaterialTheme.semantic.onSuccessContainer)
+                    // 已处置用成功色；已驳回（没有处置）用中性色，不显得像「成功」
+                    if (r.resolution == "dismissed") {
+                        Tag(resolutionLabel(r.resolution), MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Tag(resolutionLabel(r.resolution), MaterialTheme.semantic.successContainer, MaterialTheme.semantic.onSuccessContainer)
+                    }
                     Text(Ddl.display(r.handledAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
